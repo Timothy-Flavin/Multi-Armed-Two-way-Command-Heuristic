@@ -390,7 +390,10 @@ class Agent_With_Oracle:
         self.reward.append(reward)
 
     def policy_without_oracle(self, state, legal_actions):
-        return self.agent.stochastic_action(state, legal_actions), self.oracle_num
+        return (
+            self.agent.train_actions(state, legal_actions, step=True),
+            self.oracle_num,
+        )
 
     def policy_with_oracle(self, active, actions):
         commander_choices = np.copy(active)
@@ -474,11 +477,11 @@ if __name__ == "__main__":
         UCB_Multinomial(n=4, explore_n=2),
     ]
 
-    n_trials = 500
+    n_trials = 1000
     n_steps = 300
 
-    loc = np.array([0.3, 0.4, 0.5, -0.5])
-    scale = np.array([1.2, 1.2, 1.2, 1.5])
+    loc = np.array([0.3, 0.4, 1.0, -0.5])
+    scale = np.array([1.2, 1.2, 2.0, 1.5])
     observed_returns, choice_correct, modes = test_samplers(
         loc=loc, scale=scale, n=n_steps
     )
@@ -489,11 +492,11 @@ if __name__ == "__main__":
                 n=4,
                 Epsilon=0.3,
                 decay=0.95,
-                learning_rate=0.1,
+                learning_rate=0.05,
                 explore_n=3,
                 initial_val=0,
             ),
-            UCB_Multinomial(n=4, explore_n=3, initial_val=0, c=0.2, learning_rate=0.1),
+            UCB_Multinomial(n=4, explore_n=3, initial_val=0, c=0.2, learning_rate=0.05),
         ]
         oret, ccor, mds = test_samplers(loc=loc, scale=scale, n=n_steps)
         observed_returns += oret

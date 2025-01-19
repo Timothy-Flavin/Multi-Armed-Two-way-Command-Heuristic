@@ -69,7 +69,7 @@ def handle_actions(
     elif episode_type == Episode_Type.EVAL:
         with torch.no_grad():
             # action = model.deterministic_action(obs, avail_actions)
-            action, lp, qold = model.train_action(obs, avail_actions, step=True)
+            action, lp, qold = model.train_actions(obs, avail_actions, step=True)
             # print(f"Model action: {action}")
     elif episode_type == Episode_Type.EGREEDY:
         if np.random.random() < epsilon:
@@ -79,10 +79,10 @@ def handle_actions(
             )  # env.action_space.sample()#model.get_action(obs, avail_actions)
             # print(f"E Greedy Rand action: {action}")
         else:
-            action = model.deterministic_action(obs, avail_actions)
+            action = model.ego_action(obs, avail_actions)
             # print(f"E Greedy model action: {action}")
     elif episode_type == Episode_Type.RL:
-        action, lp, qold = model.train_action(obs, avail_actions, step=True)
+        action, lp, qold = model.train_actions(obs, avail_actions, step=True)
         # print(obs)
         # print(action)
         # print(f"RL schochastic action: {action}")
@@ -101,7 +101,7 @@ def check_discrete_human_likeness(model: Agent, m_batches: list, agent_id=0):
             mask = batch.action_mask[0][
                 agent_id
             ]  # gets action mask for discrete output 0 and this agent
-        model_ac = model.deterministic_action(
+        model_ac = model.ego_actions(
             observations=batch.obs[agent_id], legal_actions=mask
         )
         n_total += batch.discrete_actions.shape[1]
@@ -201,10 +201,10 @@ def actions_match(
             print(f"aid: {agent_id} chose: {target} to command")
 
         command_recipients[target, agent_id] = 1
-        act, lp, qv = MATCH[agent_id].agent.train_action(obs[target], la[target])
+        act, lp, qv = MATCH[agent_id].agent.train_actions(obs[target], la[target])
         command_contents[target, agent_id] = act
         if target != agent_id:  # action commanded to itself if it didnt just
-            act, lp, qv = MATCH[agent_id].agent.train_action(
+            act, lp, qv = MATCH[agent_id].agent.train_actions(
                 obs[agent_id], la[agent_id]
             )
             command_contents[agent_id, agent_id] = act
@@ -421,40 +421,38 @@ def run_multi_agent_episodes(
 
             if episode_type != Episode_Type.EVAL:
                 memory.save_transition(
-                    obs=obs,
-                    obs_=obs_,
                     terminated=terminated,
-                    discrete_actions=actions,
-                    continuous_actions=None,
-                    global_reward=reward,
-                    global_auxiliary_reward=er,
                     action_mask=[la],  # list for action dims
-                    discrete_log_probs=np.expand_dims(log_probs, -1),
+                    registered_vals={
+                        "obs": obs,
+                        "obs_": obs_,
+                        "discrete_actions": actions,
+                        "global_rewards": reward,
+                        "global_auxiliary_rewards": er,
+                        "discrete_log_probs": log_probs,
+                    },
                 )
-                # print("Saving transition")
-                # print(memory)
 
             if episode_type == Episode_Type.RL:
                 if episodic:
-                    if not online or terminated:
-                        exp = memory.sample_episodes(
-                            50000,
+                    if online and memory.steps_recorded > 255:
+                        exp = memory.sample_transitions(
                             as_torch=True,
                             device=device,
-                            n_episodes=(
-                                1 if online else max(5, len(memory.episode_inds))
-                            ),
+                            idx=np.arange(0, memory.steps_recorded),
                         )
-                        e: FlexiBatch
-                        for e in exp:
-                            for agent_id in range(n_agents):
-                                aloss, closs = models[agent_id].reinforcement_learn(
-                                    e, agent_id
-                                )
+                        for agent_id in range(n_agents):
+                            aloss, closs = models[agent_id].reinforcement_learn(
+                                batch=exp, critic_only=agent_id
+                            )
+                        memory.reset()
                         loss_hist[-1] += closs
 
-                    if online and done:
-                        memory.reset()
+                    if not online:
+                        exp = memory.sample_transitions(
+                            batch_size=256, as_torch=True, device=device
+                        )
+
                     if supervised_reg:
                         exp = imitation_memory.sample_episodes(
                             256, as_torch=True, device=device
@@ -724,10 +722,10 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--demo", action="store_true")
     parser.add_argument("-hf", "--hum_feedback", action="store_true")
     parser.add_argument(
-        "-a", "--algorithm", action="store", choices=["PPO", "DQ", "SAC"]
+        "-a", "--algorithm", action="store", choices=["PPO", "DQ", "DDPG", "TD3"]
     )
     parser.add_argument(
-        "-e", "--env", action="store", choices=["cartpole", "overcooked", "matrix"]
+        "-e", "--env", action="store", choices=["cartpole", "overcooked", "ttt"]
     )
     parser.add_argument("-r", "--record", action="store_true")
     parser.add_argument("-sr", "--supreg", action="store_true")
@@ -777,6 +775,7 @@ if __name__ == "__main__":
         n_actions = 9
         n_agents = 1
         results_path += "TTT/memories"
+        obs, info = env.reset()
 
     print(env.get_state_feature_names())
     device = torch.device(args.cuda_device if torch.cuda.is_available() else "cpu")
@@ -807,15 +806,22 @@ if __name__ == "__main__":
         scores = np.zeros((len(model_dirs), len(model_dirs)))
 
         h_mem = FlexibleBuffer(
-            num_steps=15000,
-            obs_size=obs.shape[1],
+            num_steps=5000,
             action_mask=False,
             discrete_action_cardinalities=[n_actions],
             path=results_path,
             name="test_" + args.env,
             n_agents=n_agents,
-            global_reward=True,
-            log_prob_discrete=True,
+            individual_registered_vars={
+                "log_prob_discrete": (None, np.float32),
+                "obs": (obs.shape[1], np.float32),
+                "obs_": (obs.shape[1], np.float32),
+                "discrete_actions": ([1], np.float32),
+            },
+            global_registered_vars={
+                "global_rewards": (None, np.float32),
+                "auxiliary_global_rewards": (None, np.float32),
+            },
         )
         for i in range(len(model_dirs)):
             for j in range(0, len(model_dirs)):
@@ -861,77 +867,82 @@ if __name__ == "__main__":
     h_mem = FlexibleBuffer.load(results_path, "test_" + args.env)
     if h_mem is None:
         h_mem = FlexibleBuffer(
-            num_steps=15000,
-            obs_size=obs.shape[1],
+            num_steps=5000,
             action_mask=False,
             discrete_action_cardinalities=[n_actions],
             path=results_path,
             name="test_" + args.env,
             n_agents=n_agents,
-            global_reward=True,
-            log_prob_discrete=True,
+            individual_registered_vars={
+                "log_prob_discrete": (None, np.float32),
+                "obs": (obs.shape[1], np.float32),
+                "obs_": (obs.shape[1], np.float32),
+                "discrete_actions": ([1], np.float32),
+            },
+            global_registered_vars={
+                "global_rewards": (None, np.float32),
+                "auxiliary_global_rewards": (None, np.float32),
+            },
         )
     print(h_mem)
 
     online = False
     episodic = False
-    if args.algorithm == "SAC":
-        model = SAC(
-            obs_size=obs.shape[1],
-            action_size=n_actions,
-            device=device,
-            directory="./SAC_test/",
-            mixer=None,
-            Q_lr=5e-5,
-            Pi_lr=2e-5,
-        )
-        model.save("bruh")
-    elif args.algorithm == "DQ":
-        model = DQ(
-            obs_size=obs[0].shape[0],
-            action_size=n_actions,
-            hidden_size=256,
-            Q_lr=1e-4,
-            sup_lr=1e-4,  # 1e-4
-            start_eps=0.95,
-            end_eps=0.05,
-            eps_half_life=5000,
-            gamma=0.99,
-            device=device,
-            checkpoint_path=results_path + "DQ/",
-            seed=args.runid,
-            cqlrl=False,
-        )
-    elif args.algorithm == "BCDQ":
-        model = BCDQ(
-            obs_size=obs[0].shape[0],
-            action_size=n_actions,
-            hidden_size=256,
-            mm_n_groups=10,
-            mm_group_size=10,
-            Q_lr=1e-3,
-            mm_lr=1e-2,
-            start_eps=0.95,
-            end_eps=0.05,
-            eps_half_life=5000,
-            gamma=0.99,
-            device=device,
-            checkpoint_path=results_path + "DQ/",
-            seed=1,
+    # if args.algorithm == "SAC":
+    #     model = SAC(
+    #         obs_size=obs.shape[1],
+    #         action_size=n_actions,
+    #         device=device,
+    #         directory="./SAC_test/",
+    #         mixer=None,
+    #         Q_lr=5e-5,
+    #         Pi_lr=2e-5,
+    #     )
+    #     model.save("bruh")
+    if args.algorithm == "DQ":
+        model = (
+            DQN(
+                obs_dim=obs.shape[1],
+                continuous_action_dims=0,  # continuous_env.action_space.shape[0],
+                max_actions=None,  # continuous_env.action_space.high,
+                min_actions=None,  # continuous_env.action_space.low,
+                discrete_action_dims=[env.action_space.n],
+                hidden_dims=[64, 64],
+                device="cuda:0",
+                lr=3e-5,
+                activation="relu",
+                dueling=True,
+                n_c_action_bins=0,
+            ),
         )
     elif args.algorithm == "PPO":
-        model = PPO(
-            obs_size=obs[0].shape[0],
-            action_size=n_actions,
-            lr_actor=0.0003,
-            lr_critic=0.005,
-            gamma=0.99,
-            eps_clip=0.1,
-            n_epochs=3,
-            device=device,
+        model = (
+            PG(
+                obs_dim=obs.shape[1],
+                discrete_action_dims=[env.action_space.n],
+                # continuous_action_dim=continuous_env.action_space.shape[0],
+                hidden_dims=np.array([64, 64]),
+                # min_actions=continuous_env.action_space.low,
+                # max_actions=continuous_env.action_space.high,
+                gamma=0.99,
+                device="cuda",
+                entropy_loss=0.01,
+                mini_batch_size=32,
+                n_epochs=4,
+                lr=3e-4,
+                advantage_type="gae",
+                norm_advantages=True,
+                anneal_lr=200000,
+                value_loss_coef=0.5,
+                ppo_clip=0.2,
+                # value_clip=0.5,
+                orthogonal=True,
+                activation="relu",
+                starting_actorlogstd=0,
+                gae_lambda=0.95,
+            ),
         )
         online = True
-        episodic = True
     if args.record:
         # human_buff(env, h_mem, n_agents=n_agents)
         if args.env == "cartpole":
@@ -964,15 +975,22 @@ if __name__ == "__main__":
     r_mem = None
     if r_mem is None:
         r_mem = FlexibleBuffer(
-            num_steps=15000,
-            obs_size=obs.shape[1],
+            num_steps=20000,
             action_mask=False,
             discrete_action_cardinalities=[n_actions],
             path=results_path,
             name="test_" + args.env,
             n_agents=n_agents,
-            global_reward=True,
-            log_prob_discrete=True,
+            individual_registered_vars={
+                "log_prob_discrete": (None, np.float32),
+                "obs": (obs.shape[1], np.float32),
+                "obs_": (obs.shape[1], np.float32),
+                "discrete_actions": ([1], np.float32),
+            },
+            global_registered_vars={
+                "global_rewards": (None, np.float32),
+                "auxiliary_global_rewards": (None, np.float32),
+            },
         )
 
     if int(args.egreedy) > 0:
@@ -1037,7 +1055,7 @@ if __name__ == "__main__":
     elif args.env == "overcooked":
         dirpath = "./PaperExperiment/Overcooked/"
     else:
-        dirpath = "./PaperExperiment/SC2/"
+        dirpath = "./PaperExperiment/TTT/"
     dirpath = dirpath + f"algo_{args.algorithm}/"
 
     rew, exprew, hl = run_multi_agent_episodes(
