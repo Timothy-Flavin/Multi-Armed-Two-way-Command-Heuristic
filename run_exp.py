@@ -74,6 +74,11 @@ def handle_actions(
                 obs, avail_actions, step=True
             )
             action = discrete_actions[0]  # TODO: Make env wrapper process this better
+            if isinstance(dlp, int):
+                # Because non policy-gradient algorithms return 0
+                lp = dlp
+            else:
+                lp = dlp[0]
             # print(f"Model action: {action}")
     elif episode_type == Episode_Type.EGREEDY:
         if np.random.random() < epsilon:
@@ -83,13 +88,22 @@ def handle_actions(
             )  # env.action_space.sample()#model.get_action(obs, avail_actions)
             # print(f"E Greedy Rand action: {action}")
         else:
-            action = model.ego_action(obs, avail_actions)
+            action = model.ego_actions(obs, avail_actions)
             # print(f"E Greedy model action: {action}")
     elif episode_type == Episode_Type.RL:
-        action, lp, qold = model.train_actions(obs, avail_actions, step=True)
+        # action, lp, qold
+        discrete_actions, continuous_actions, dlp, clp, value = model.train_actions(
+            obs, avail_actions, step=True
+        )
+        action = discrete_actions[0]  # TODO: Make this handle both action spaces
+        if isinstance(dlp, int):
+            lp = dlp  # For non policy gradient methods that return zero
+        else:
+            lp = dlp[0]
         # print(obs)
         # print(action)
         # print(f"RL schochastic action: {action}")
+    print(action, lp)
     return int(action), lp
 
 
@@ -138,7 +152,7 @@ def actions_match(
     if not torch.is_tensor(obs):
         obs = torch.from_numpy(obs).float().to(device)
 
-    actions = np.zeros(shape=n_agents, dtype=np.int32)
+    actions = np.zeros(shape=n_agents, dtype=np.int64)
     la = np.ones(shape=(n_agents, n_actions))
     for agent_id in range(n_agents):
         avail = env.get_avail_agent_actions(agent_id)
@@ -274,7 +288,7 @@ def actions_no_match(
     n_actions,
     env: Wrapper,
 ):
-    actions = np.zeros(shape=n_agents, dtype=np.int32)
+    actions = np.zeros(shape=n_agents, dtype=np.int64)
     la = np.ones(shape=(n_agents, n_actions))
     if memory.discrete_log_probs is not None:
         log_probs = np.ones(shape=(n_agents))
@@ -775,7 +789,9 @@ if __name__ == "__main__":
         results_path += "Matrix/memories/"
 
     elif args.env == "ttt":
-        env = TTTWrapped(1, 1, "human", True, True)
+        env = TTTWrapped(
+            nfirst=1, n_moves=1, render_mode="human", random_op=True, obs_as_array=True
+        )
         n_actions = 9
         n_agents = 1
         results_path += "TTT/memories"
@@ -820,11 +836,11 @@ if __name__ == "__main__":
                 "discrete_log_probs": (None, np.float32),
                 "obs": ([obs.shape[1]], np.float32),
                 "obs_": ([obs.shape[1]], np.float32),
-                "discrete_actions": ([1], np.float32),
+                "discrete_actions": ([1], np.int64),
             },
             global_registered_vars={
                 "global_rewards": (None, np.float32),
-                "auxiliary_global_rewards": (None, np.float32),
+                "global_auxiliary_rewards": (None, np.float32),
             },
         )
         for i in range(len(model_dirs)):
@@ -881,11 +897,11 @@ if __name__ == "__main__":
                 "discrete_log_probs": (None, np.float32),
                 "obs": ([obs.shape[1]], np.float32),
                 "obs_": ([obs.shape[1]], np.float32),
-                "discrete_actions": ([1], np.float32),
+                "discrete_actions": ([1], np.int64),
             },
             global_registered_vars={
                 "global_rewards": (None, np.float32),
-                "auxiliary_global_rewards": (None, np.float32),
+                "global_auxiliary_rewards": (None, np.float32),
             },
         )
     print(h_mem)
@@ -987,11 +1003,11 @@ if __name__ == "__main__":
                 "discrete_log_probs": (None, np.float32),
                 "obs": ([obs.shape[1]], np.float32),
                 "obs_": ([obs.shape[1]], np.float32),
-                "discrete_actions": ([1], np.float32),
+                "discrete_actions": ([1], np.int64),
             },
             global_registered_vars={
                 "global_rewards": (None, np.float32),
-                "auxiliary_global_rewards": (None, np.float32),
+                "global_auxiliary_rewards": (None, np.float32),
             },
         )
 
