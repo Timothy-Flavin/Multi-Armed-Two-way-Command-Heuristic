@@ -69,7 +69,11 @@ def handle_actions(
     elif episode_type == Episode_Type.EVAL:
         with torch.no_grad():
             # action = model.deterministic_action(obs, avail_actions)
-            action, lp, qold = model.train_actions(obs, avail_actions, step=True)
+            # action, lp, qold = model.train_actions(obs, avail_actions, step=True)
+            discrete_actions, continuous_actions, dlp, clp, value = model.train_actions(
+                obs, avail_actions, step=True
+            )
+            action = discrete_actions[0]  # TODO: Make env wrapper process this better
             # print(f"Model action: {action}")
     elif episode_type == Episode_Type.EGREEDY:
         if np.random.random() < epsilon:
@@ -807,15 +811,15 @@ if __name__ == "__main__":
 
         h_mem = FlexibleBuffer(
             num_steps=5000,
-            action_mask=False,
+            track_action_mask=False,
             discrete_action_cardinalities=[n_actions],
             path=results_path,
             name="test_" + args.env,
             n_agents=n_agents,
             individual_registered_vars={
-                "log_prob_discrete": (None, np.float32),
-                "obs": (obs.shape[1], np.float32),
-                "obs_": (obs.shape[1], np.float32),
+                "discrete_log_probs": (None, np.float32),
+                "obs": ([obs.shape[1]], np.float32),
+                "obs_": ([obs.shape[1]], np.float32),
                 "discrete_actions": ([1], np.float32),
             },
             global_registered_vars={
@@ -868,15 +872,15 @@ if __name__ == "__main__":
     if h_mem is None:
         h_mem = FlexibleBuffer(
             num_steps=5000,
-            action_mask=False,
+            track_action_mask=False,
             discrete_action_cardinalities=[n_actions],
             path=results_path,
             name="test_" + args.env,
             n_agents=n_agents,
             individual_registered_vars={
-                "log_prob_discrete": (None, np.float32),
-                "obs": (obs.shape[1], np.float32),
-                "obs_": (obs.shape[1], np.float32),
+                "discrete_log_probs": (None, np.float32),
+                "obs": ([obs.shape[1]], np.float32),
+                "obs_": ([obs.shape[1]], np.float32),
                 "discrete_actions": ([1], np.float32),
             },
             global_registered_vars={
@@ -900,48 +904,46 @@ if __name__ == "__main__":
     #     )
     #     model.save("bruh")
     if args.algorithm == "DQ":
-        model = (
-            DQN(
-                obs_dim=obs.shape[1],
-                continuous_action_dims=0,  # continuous_env.action_space.shape[0],
-                max_actions=None,  # continuous_env.action_space.high,
-                min_actions=None,  # continuous_env.action_space.low,
-                discrete_action_dims=[env.action_space.n],
-                hidden_dims=[64, 64],
-                device="cuda:0",
-                lr=3e-5,
-                activation="relu",
-                dueling=True,
-                n_c_action_bins=0,
-            ),
+        model = DQN(
+            obs_dim=obs.shape[1],
+            continuous_action_dims=0,  # continuous_env.action_space.shape[0],
+            max_actions=None,  # continuous_env.action_space.high,
+            min_actions=None,  # continuous_env.action_space.low,
+            discrete_action_dims=[env.action_space.n],
+            hidden_dims=[64, 64],
+            device="cuda:0",
+            lr=3e-5,
+            activation="relu",
+            dueling=True,
+            n_c_action_bins=0,
         )
+
     elif args.algorithm == "PPO":
-        model = (
-            PG(
-                obs_dim=obs.shape[1],
-                discrete_action_dims=[env.action_space.n],
-                # continuous_action_dim=continuous_env.action_space.shape[0],
-                hidden_dims=np.array([64, 64]),
-                # min_actions=continuous_env.action_space.low,
-                # max_actions=continuous_env.action_space.high,
-                gamma=0.99,
-                device="cuda",
-                entropy_loss=0.01,
-                mini_batch_size=32,
-                n_epochs=4,
-                lr=3e-4,
-                advantage_type="gae",
-                norm_advantages=True,
-                anneal_lr=200000,
-                value_loss_coef=0.5,
-                ppo_clip=0.2,
-                # value_clip=0.5,
-                orthogonal=True,
-                activation="relu",
-                starting_actorlogstd=0,
-                gae_lambda=0.95,
-            ),
+        model = PG(
+            obs_dim=obs.shape[1],
+            discrete_action_dims=[env.action_space.n],
+            # continuous_action_dim=continuous_env.action_space.shape[0],
+            hidden_dims=np.array([64, 64]),
+            # min_actions=continuous_env.action_space.low,
+            # max_actions=continuous_env.action_space.high,
+            gamma=0.99,
+            device="cuda",
+            entropy_loss=0.01,
+            mini_batch_size=32,
+            n_epochs=4,
+            lr=3e-4,
+            advantage_type="gae",
+            norm_advantages=True,
+            anneal_lr=200000,
+            value_loss_coef=0.5,
+            ppo_clip=0.2,
+            # value_clip=0.5,
+            orthogonal=True,
+            activation="relu",
+            starting_actorlogstd=0,
+            gae_lambda=0.95,
         )
+
         online = True
     if args.record:
         # human_buff(env, h_mem, n_agents=n_agents)
@@ -976,15 +978,15 @@ if __name__ == "__main__":
     if r_mem is None:
         r_mem = FlexibleBuffer(
             num_steps=20000,
-            action_mask=False,
+            track_action_mask=False,
             discrete_action_cardinalities=[n_actions],
             path=results_path,
             name="test_" + args.env,
             n_agents=n_agents,
             individual_registered_vars={
-                "log_prob_discrete": (None, np.float32),
-                "obs": (obs.shape[1], np.float32),
-                "obs_": (obs.shape[1], np.float32),
+                "discrete_log_probs": (None, np.float32),
+                "obs": ([obs.shape[1]], np.float32),
+                "obs_": ([obs.shape[1]], np.float32),
                 "discrete_actions": ([1], np.float32),
             },
             global_registered_vars={

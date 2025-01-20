@@ -1,0 +1,14 @@
+py -3.11 run_exp.py -e ttt -a DQ -rid 0 -rls 10000 -cuda "cuda:0"
+
+-d demo
+-hf human feedback
+-r record
+-sr supreg
+-m mix
+-nsh nshot
+-nst n_step
+-rls rlsteps
+-rands
+-egr eps greedy
+-g graph
+-eval evaluate pairwise

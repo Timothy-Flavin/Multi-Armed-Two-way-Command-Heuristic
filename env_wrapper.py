@@ -6,6 +6,7 @@ import time
 class Action_Space:
     def __init__(self, size):
         self.size = size
+        self.n = size
 
     def sample(self):
         return np.random.randint(0, self.size)
