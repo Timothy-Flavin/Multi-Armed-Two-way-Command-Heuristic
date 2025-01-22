@@ -348,8 +348,8 @@ def run_multi_agent_episodes(
     smooth_reward_hist = []
     ep_expert_reward_hist = []
     smooth_expert_reward_hist = []
-    recent_rewards = deque(maxlen=10)
-    recent_expert_rewards = deque(maxlen=10)
+    recent_rewards = deque(maxlen=20)
+    recent_expert_rewards = deque(maxlen=20)
     human_likeness = []
     loss_hist = []
 
@@ -452,52 +452,36 @@ def run_multi_agent_episodes(
                 )
 
             if episode_type == Episode_Type.RL:
-                if episodic:
-                    if online and memory.steps_recorded > 255:
-                        exp = memory.sample_transitions(
-                            as_torch=True,
-                            device=device,
-                            idx=np.arange(0, memory.steps_recorded),
+                # if episodic:
+                if online and memory.steps_recorded > 255:
+                    exp = memory.sample_transitions(
+                        as_torch=True,
+                        device=device,
+                        idx=np.arange(0, memory.steps_recorded),
+                    )
+                    for agent_id in range(n_agents):
+                        aloss, closs = models[agent_id].reinforcement_learn(
+                            batch=exp, critic_only=agent_id
                         )
-                        for agent_id in range(n_agents):
-                            aloss, closs = models[agent_id].reinforcement_learn(
-                                batch=exp, critic_only=agent_id
-                            )
-                        memory.reset()
-                        loss_hist[-1] += closs
+                    memory.reset()
+                    loss_hist[-1] += closs
 
-                    if not online:
-                        exp = memory.sample_transitions(
-                            batch_size=256, as_torch=True, device=device
-                        )
-
-                    if supervised_reg:
-                        exp = imitation_memory.sample_episodes(
-                            256, as_torch=True, device=device
-                        )
-                        e: FlexiBatch
-                        for e in exp:
-                            for agent_id in range(n_agents):
-                                models[agent_id].imitation_learn(
-                                    e.obs[agent_id], e.discrete_actions[agent_id]
-                                )
-                else:
-                    # print("not that")
+                elif memory.steps_recorded > 255:
                     exp = memory.sample_transitions(256, as_torch=True, device=device)
                     for agent_id in range(n_agents):
                         aloss, closs = models[agent_id].reinforcement_learn(
                             exp, agent_id
                         )
-                    if supervised_reg:
-                        exp = imitation_memory.sample_transitions(
-                            256, as_torch=True, device=device
-                        )
-                        # print(exp)
-                        models[agent_id].imitation_learn(
-                            exp.obs[agent_id], exp.discrete_actions[agent_id]
-                        )
-
                     loss_hist[-1] += closs
+
+                if supervised_reg:  # TODO: make sample in order for rnn
+                    exp = imitation_memory.sample_transitions(
+                        256, as_torch=True, device=device
+                    )
+                    # print(exp)
+                    models[agent_id].imitation_learn(
+                        exp.obs[agent_id], exp.discrete_actions[agent_id]
+                    )
 
             if episode_type == Episode_Type.RAND:
                 if learn_during_rand:
@@ -588,7 +572,7 @@ def run_multi_agent_episodes(
         # print(
         #    f"ce: {current_episode}, {current_episode % 50 == 0} and {current_episode > 1} and {graph_progress}"
         # )
-        if current_episode % 50 == 0 and current_episode > 1 and graph_progress:
+        if current_episode % 500 == 0 and current_episode > 1 and graph_progress:
             smr = np.array(smooth_reward_hist)
             smer = np.array(smooth_expert_reward_hist)
             # m = max(np.max(smr), np.max(smer))
@@ -695,10 +679,10 @@ def get_agent(obs, args, device, n_actions):
             max_actions=0,  # continuous_env.action_space.high,
             gamma=0.99,
             device="cuda",
-            entropy_loss=0.01,
+            entropy_loss=0.001,
             mini_batch_size=32,
             n_epochs=4,
-            lr=3e-4,
+            lr=1e-4,
             advantage_type="gae",
             norm_advantages=True,
             anneal_lr=2000000,
@@ -706,15 +690,15 @@ def get_agent(obs, args, device, n_actions):
             ppo_clip=0.2,
             value_clip=0.5,
             orthogonal=True,
-            activation="relu",
+            activation="tanh",
             starting_actorlogstd=0,
             gae_lambda=0.98,
         ),
         "DQ": DQN(
             obs_dim=obs.shape[1],
-            continuous_action_dims=0,  # continuous_env.action_space.shape[0],
-            max_actions=0,  # continuous_env.action_space.high,
-            min_actions=0,  # continuous_env.action_space.low,
+            continuous_action_dims=None,  # continuous_env.action_space.shape[0],
+            max_actions=None,  # continuous_env.action_space.high,
+            min_actions=None,  # continuous_env.action_space.low,
             discrete_action_dims=[n_actions],
             hidden_dims=[64, 64],
             device="cuda:0",
@@ -790,7 +774,7 @@ if __name__ == "__main__":
 
     elif args.env == "ttt":
         env = TTTWrapped(
-            nfirst=1, n_moves=1, render_mode="human", random_op=True, obs_as_array=True
+            nfirst=1, n_moves=1, render_mode=None, random_op=True, obs_as_array=True
         )
         n_actions = 9
         n_agents = 1
@@ -833,7 +817,7 @@ if __name__ == "__main__":
             name="test_" + args.env,
             n_agents=n_agents,
             individual_registered_vars={
-                "discrete_log_probs": (None, np.float32),
+                "discrete_log_probs": ([1], np.float32),
                 "obs": ([obs.shape[1]], np.float32),
                 "obs_": ([obs.shape[1]], np.float32),
                 "discrete_actions": ([1], np.int64),
@@ -894,7 +878,7 @@ if __name__ == "__main__":
             name="test_" + args.env,
             n_agents=n_agents,
             individual_registered_vars={
-                "discrete_log_probs": (None, np.float32),
+                "discrete_log_probs": ([1], np.float32),
                 "obs": ([obs.shape[1]], np.float32),
                 "obs_": ([obs.shape[1]], np.float32),
                 "discrete_actions": ([1], np.int64),
@@ -1000,7 +984,7 @@ if __name__ == "__main__":
             name="test_" + args.env,
             n_agents=n_agents,
             individual_registered_vars={
-                "discrete_log_probs": (None, np.float32),
+                "discrete_log_probs": ([1], np.float32),
                 "obs": ([obs.shape[1]], np.float32),
                 "obs_": ([obs.shape[1]], np.float32),
                 "discrete_actions": ([1], np.int64),
@@ -1010,7 +994,9 @@ if __name__ == "__main__":
                 "global_auxiliary_rewards": (None, np.float32),
             },
         )
-
+    # print(r_mem.obs.shape)
+    # print(r_mem)
+    # exit()
     if int(args.egreedy) > 0:
         print("Sampling random trajectories")
         rew, exprew, hl = run_multi_agent_episodes(
