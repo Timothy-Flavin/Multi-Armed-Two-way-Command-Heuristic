@@ -291,7 +291,7 @@ def actions_no_match(
     actions = np.zeros(shape=n_agents, dtype=np.int64)
     la = np.ones(shape=(n_agents, n_actions))
     if memory.discrete_log_probs is not None:
-        log_probs = np.ones(shape=(n_agents))
+        log_probs = np.ones(shape=(n_agents, 1))
     else:
         log_probs = None
     for agent_id in range(n_agents):
@@ -438,6 +438,7 @@ def run_multi_agent_episodes(
             # print(env.env)
 
             if episode_type != Episode_Type.EVAL:
+
                 memory.save_transition(
                     terminated=terminated,
                     action_mask=[la],  # list for action dims
@@ -774,10 +775,10 @@ if __name__ == "__main__":
 
     elif args.env == "ttt":
         env = TTTWrapped(
-            nfirst=1, n_moves=1, render_mode=None, random_op=True, obs_as_array=True
+            nfirst=2, n_moves=2, render_mode=None, random_op=True, obs_as_array=True
         )
         n_actions = 9
-        n_agents = 1
+        n_agents = 2
         results_path += "TTT/memories"
         obs, info = env.reset()
 
@@ -916,6 +917,7 @@ if __name__ == "__main__":
             activation="relu",
             dueling=True,
             n_c_action_bins=0,
+            entropy=0.01,
         )
 
     elif args.algorithm == "PPO":
