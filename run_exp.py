@@ -103,7 +103,7 @@ def handle_actions(
         # print(obs)
         # print(action)
         # print(f"RL schochastic action: {action}")
-    print(action, lp)
+    # print(action, lp)
     return int(action), lp
 
 
@@ -332,7 +332,16 @@ def run_multi_agent_episodes(
     learn_during_rand=False,
     display=False,
     graph_progress=False,
-    reward_checkpoint_bin=[40, 60, 70, 80, 100],
+    reward_checkpoint_bin=[
+        0.0,
+        0.2,
+        0.4,
+        0.6,
+        0.7,
+        0.8,
+        0.9,
+        0.95,
+    ],  # [10, 40, 60, 70, 80, 100],
     model_path="",
     MATCH=None,
     n_shot=1,
@@ -348,8 +357,8 @@ def run_multi_agent_episodes(
     smooth_reward_hist = []
     ep_expert_reward_hist = []
     smooth_expert_reward_hist = []
-    recent_rewards = deque(maxlen=20)
-    recent_expert_rewards = deque(maxlen=20)
+    recent_rewards = deque(maxlen=50)
+    recent_expert_rewards = deque(maxlen=50)
     human_likeness = []
     loss_hist = []
 
@@ -360,9 +369,9 @@ def run_multi_agent_episodes(
         )
 
     while overall_step < max_steps and not quit_early:
-        print(
-            f"overall: {overall_step} ep# {current_episode}"
-        )  # ep step: {current_episode_step}")
+        # print(
+        #    f"overall: {overall_step} ep# {current_episode}"
+        # )  # ep step: {current_episode_step}")
         idx_before = memory.idx
         steps_recorded_before = memory.steps_recorded
         ep_inds = None if memory.episode_inds is None else memory.episode_inds.copy()
@@ -375,7 +384,7 @@ def run_multi_agent_episodes(
         current_episode_step = 0
 
         if current_episode % n_shot == 0:
-            print("Resetting match samplers")
+            # print("Resetting match samplers")
             MATCH_Wrappers = [
                 Agent_With_Oracle(
                     agent=models[0], n_agents=n_agents, oracle_num=0, sampler="Thompson"
@@ -454,7 +463,7 @@ def run_multi_agent_episodes(
 
             if episode_type == Episode_Type.RL:
                 # if episodic:
-                if online and memory.steps_recorded > 255:
+                if online and memory.steps_recorded > 511:
                     exp = memory.sample_transitions(
                         as_torch=True,
                         device=device,
@@ -467,7 +476,7 @@ def run_multi_agent_episodes(
                     memory.reset()
                     loss_hist[-1] += closs
 
-                elif memory.steps_recorded > 255:
+                elif not online and memory.steps_recorded > 255:
                     exp = memory.sample_transitions(256, as_torch=True, device=device)
                     for agent_id in range(n_agents):
                         aloss, closs = models[agent_id].reinforcement_learn(
@@ -519,18 +528,20 @@ def run_multi_agent_episodes(
         smooth_expert_reward_hist.append(
             sum(recent_expert_rewards) / len(recent_expert_rewards)
         )
-        print(
-            f"Episode: {current_episode:<4}  "
-            f"Episode steps: {current_episode_step:<4}  "
-            f"Return: {ep_reward_hist[current_episode]:<5.1f} smooth: {smooth_reward_hist[-1]}"
-        )
+        if current_episode % 50 == 0:
+            print(
+                f"Episode: {current_episode:<4}  "
+                f"Episode steps: {current_episode_step:<4}  "
+                f"Return: {ep_reward_hist[current_episode]:<5.1f} smooth: {smooth_reward_hist[-1]}"
+            )
 
         if episode_type == Episode_Type.RL and len(reward_checkpoint_bin) > 0:
             mbin = min(reward_checkpoint_bin)
+            # print(smooth_reward_hist[-1])
+            # print(mbin)
             if smooth_reward_hist[-1] > mbin:
-                models[agent_id].save(
-                    model_path + f"r_{mbin}_supreg{supervised_reg}_{agent_id}/"
-                )
+                print("Checkpointing model")
+                models[0].save(model_path + f"r_{mbin}_supreg{supervised_reg}/")
                 reward_checkpoint_bin.pop(reward_checkpoint_bin.index(mbin))
 
         if episode_type == Episode_Type.RL and overall_step >= max_steps:
@@ -680,20 +691,20 @@ def get_agent(obs, args, device, n_actions):
             max_actions=0,  # continuous_env.action_space.high,
             gamma=0.99,
             device="cuda",
-            entropy_loss=0.001,
-            mini_batch_size=32,
+            entropy_loss=0.01,
+            mini_batch_size=64,
             n_epochs=4,
-            lr=1e-4,
+            lr=3e-4,
             advantage_type="gae",
-            norm_advantages=True,
-            anneal_lr=2000000,
+            norm_advantages=False,
+            anneal_lr=1000000,
             value_loss_coef=0.5,  # 5,
             ppo_clip=0.2,
             value_clip=0.5,
             orthogonal=True,
             activation="tanh",
             starting_actorlogstd=0,
-            gae_lambda=0.98,
+            gae_lambda=0.95,
         ),
         "DQ": DQN(
             obs_dim=obs.shape[1],
@@ -703,10 +714,11 @@ def get_agent(obs, args, device, n_actions):
             discrete_action_dims=[n_actions],
             hidden_dims=[64, 64],
             device="cuda:0",
-            lr=3e-5,
+            lr=3e-4,
             activation="relu",
             dueling=True,
             n_c_action_bins=0,
+            eps_decay_half_life=3000,
         ),
     }
 
@@ -917,7 +929,8 @@ if __name__ == "__main__":
             activation="relu",
             dueling=True,
             n_c_action_bins=0,
-            entropy=0.01,
+            entropy=0.03,
+            munchausen=0.9,
         )
 
     elif args.algorithm == "PPO":
@@ -931,17 +944,17 @@ if __name__ == "__main__":
             gamma=0.99,
             device="cuda",
             entropy_loss=0.01,
-            mini_batch_size=32,
+            mini_batch_size=64,
             n_epochs=4,
             lr=3e-4,
             advantage_type="gae",
-            norm_advantages=True,
+            norm_advantages=False,
             anneal_lr=200000,
             value_loss_coef=0.5,
             ppo_clip=0.2,
             # value_clip=0.5,
             orthogonal=True,
-            activation="relu",
+            activation="tanh",
             starting_actorlogstd=0,
             gae_lambda=0.95,
         )

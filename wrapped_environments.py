@@ -109,7 +109,14 @@ class OvercookWrapped(Wrapper):
 
         next_obs, reward, terminated, info = self.env.step(b)
         self.obs = next_obs
-        return self.state_vecorizer(next_obs), reward, terminated, False, info
+        # print(sum(info["shaped_r_by_agent"]))
+        return (
+            self.state_vecorizer(next_obs),
+            reward + sum(info["shaped_r_by_agent"]),
+            terminated,
+            False,
+            info,
+        )
 
     def expert_reward(self, obs):
         return abs(obs[0][3] / 10)
