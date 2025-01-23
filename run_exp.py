@@ -11,6 +11,7 @@ from wrapped_environments import (
     OvercookWrapped,
     Wrapper,
     TTTWrapped,
+    TTTWrappedRoles,
 )  # cartpole env for testing
 from enum import Enum
 from flexibuff import FlexibleBuffer, FlexiBatch
@@ -332,16 +333,7 @@ def run_multi_agent_episodes(
     learn_during_rand=False,
     display=False,
     graph_progress=False,
-    reward_checkpoint_bin=[
-        0.0,
-        0.2,
-        0.4,
-        0.6,
-        0.7,
-        0.8,
-        0.9,
-        0.95,
-    ],  # [10, 40, 60, 70, 80, 100],
+    reward_checkpoint_bin=[10, 40, 60, 70, 80, 100],  #   #
     model_path="",
     MATCH=None,
     n_shot=1,
@@ -524,10 +516,25 @@ def run_multi_agent_episodes(
         human_likeness.append(hl)
         recent_rewards.append(ep_reward_hist[-1])
         recent_expert_rewards.append(ep_expert_reward_hist[-1])
-        smooth_reward_hist.append(sum(recent_rewards) / len(recent_rewards))
-        smooth_expert_reward_hist.append(
-            sum(recent_expert_rewards) / len(recent_expert_rewards)
-        )
+
+        if len(smooth_reward_hist) > 10:
+            er = smooth_reward_hist[-1]
+            smooth_reward_hist.append(
+                0.98 * er + 0.02 * ep_reward_hist[current_episode]
+            )
+
+        else:
+            smooth_reward_hist.append(sum(recent_rewards) / len(recent_rewards))
+        # same for expert rewards:
+        if len(smooth_expert_reward_hist) > 10:
+            smooth_expert_reward_hist.append(
+                0.98 * smooth_expert_reward_hist[-1] + 0.02 * ep_expert_reward_hist[-1]
+            )
+        else:
+            smooth_expert_reward_hist.append(
+                sum(recent_expert_rewards) / len(recent_expert_rewards)
+            )
+
         if current_episode % 50 == 0:
             print(
                 f"Episode: {current_episode:<4}  "
@@ -540,8 +547,13 @@ def run_multi_agent_episodes(
             # print(smooth_reward_hist[-1])
             # print(mbin)
             if smooth_reward_hist[-1] > mbin:
-                print("Checkpointing model")
-                models[0].save(model_path + f"r_{mbin}_supreg{supervised_reg}/")
+                print(
+                    "Checkpointing model at : ",
+                    model_path + f"r_{mbin}_supreg{supervised_reg}/",
+                )
+                models[0].save(
+                    model_path + f"r_{mbin}_supreg{supervised_reg}_{args.runid}/"
+                )
                 reward_checkpoint_bin.pop(reward_checkpoint_bin.index(mbin))
 
         if episode_type == Episode_Type.RL and overall_step >= max_steps:
@@ -737,10 +749,13 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--demo", action="store_true")
     parser.add_argument("-hf", "--hum_feedback", action="store_true")
     parser.add_argument(
-        "-a", "--algorithm", action="store", choices=["PPO", "DQ", "DDPG", "TD3"]
+        "-a", "--algorithm", action="store", choices=["PPO", "DQ", "SDQ", "MDQ", "PG"]
     )
     parser.add_argument(
-        "-e", "--env", action="store", choices=["cartpole", "overcooked", "ttt"]
+        "-e",
+        "--env",
+        action="store",
+        choices=["cartpole", "overcooked", "ttt", "ttt_roles"],
     )
     parser.add_argument("-r", "--record", action="store_true")
     parser.add_argument("-sr", "--supreg", action="store_true")
@@ -759,6 +774,13 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    reward_bin = []
+    arg_to_env_str = {
+        "cartpole": "Cartpole",
+        "overcooked": "Overcooked",
+        "ttt": "TTT",
+        "ttt_roles": "TTTRoles",
+    }
     results_path = "./PaperExperiment/"
     if args.env == "sc2":
         # env, n_actions, n_agents = get_sc2_env()
@@ -770,6 +792,7 @@ if __name__ == "__main__":
         obs = env.get_obs()
         n_actions = 6
         n_agents = 2
+        reward_bin = [10, 40, 60, 70, 80, 100]
 
     elif args.env == "cartpole":
         env = CartpoleWrapped()
@@ -793,6 +816,34 @@ if __name__ == "__main__":
         n_agents = 2
         results_path += "TTT/memories"
         obs, info = env.reset()
+        reward_bin = [
+            0.0,
+            0.2,
+            0.4,
+            0.6,
+            0.7,
+            0.8,
+            0.9,
+            0.95,
+        ]
+    elif args.env == "ttt_roles":
+        env = TTTWrappedRoles(
+            nfirst=2, n_moves=2, render_mode=None, random_op=True, obs_as_array=True
+        )
+        n_actions = 9
+        n_agents = 2
+        results_path += "TTTRoles/memories"
+        obs, info = env.reset()
+        reward_bin = [
+            0.0,
+            0.2,
+            0.4,
+            0.6,
+            0.7,
+            0.8,
+            0.9,
+            0.95,
+        ]
 
     print(env.get_state_feature_names())
     device = torch.device(args.cuda_device if torch.cuda.is_available() else "cpu")
@@ -802,7 +853,9 @@ if __name__ == "__main__":
         res_paths = []
         dir_lists = []
         for r in model_fams:
-            res_paths.append(results_path + f"Overcooked/algo_{r}/model_checkpoints/")
+            res_paths.append(
+                results_path + f"{arg_to_env_str[args.env]}/algo_{r}/model_checkpoints/"
+            )
             dir_lists.append(os.listdir(res_paths[-1]))
         model_dirs = []
         graph_names = []
@@ -925,7 +978,37 @@ if __name__ == "__main__":
             discrete_action_dims=[env.action_space.n],
             hidden_dims=[64, 64],
             device="cuda:0",
-            lr=3e-5,
+            lr=1e-4,
+            activation="relu",
+            dueling=True,
+            n_c_action_bins=0,
+        )
+
+    if args.algorithm == "SDQ":
+        model = DQN(
+            obs_dim=obs.shape[1],
+            continuous_action_dims=0,  # continuous_env.action_space.shape[0],
+            max_actions=None,  # continuous_env.action_space.high,
+            min_actions=None,  # continuous_env.action_space.low,
+            discrete_action_dims=[env.action_space.n],
+            hidden_dims=[64, 64],
+            device="cuda:0",
+            lr=1e-4,
+            activation="relu",
+            dueling=True,
+            n_c_action_bins=0,
+            entropy=0.03,
+        )
+    if args.algorithm == "MDQ":
+        model = DQN(
+            obs_dim=obs.shape[1],
+            continuous_action_dims=0,  # continuous_env.action_space.shape[0],
+            max_actions=None,  # continuous_env.action_space.high,
+            min_actions=None,  # continuous_env.action_space.low,
+            discrete_action_dims=[env.action_space.n],
+            hidden_dims=[64, 64],
+            device="cuda:0",
+            lr=1e-4,
             activation="relu",
             dueling=True,
             n_c_action_bins=0,
@@ -933,7 +1016,7 @@ if __name__ == "__main__":
             munchausen=0.9,
         )
 
-    elif args.algorithm == "PPO":
+    if args.algorithm == "PPO":
         model = PG(
             obs_dim=obs.shape[1],
             discrete_action_dims=[env.action_space.n],
@@ -960,6 +1043,30 @@ if __name__ == "__main__":
         )
 
         online = True
+
+    if args.algorithm == "PG":
+        model = PG(
+            obs_dim=obs.shape[1],
+            discrete_action_dims=[env.action_space.n],
+            hidden_dims=np.array([64, 64]),
+            gamma=0.99,
+            device="cuda",
+            entropy_loss=0.01,
+            mini_batch_size=64,
+            n_epochs=1,
+            lr=3e-4,
+            advantage_type="gae",
+            norm_advantages=False,
+            anneal_lr=200000,
+            value_loss_coef=0.5,
+            orthogonal=True,
+            activation="tanh",
+            starting_actorlogstd=0,
+            gae_lambda=0.95,
+        )
+
+        online = True
+
     if args.record:
         # human_buff(env, h_mem, n_agents=n_agents)
         if args.env == "cartpole":
@@ -992,7 +1099,7 @@ if __name__ == "__main__":
     r_mem = None
     if r_mem is None:
         r_mem = FlexibleBuffer(
-            num_steps=20000,
+            num_steps=10000,
             track_action_mask=False,
             discrete_action_cardinalities=[n_actions],
             path=results_path,
@@ -1073,8 +1180,10 @@ if __name__ == "__main__":
         dirpath = "./PaperExperiment/Cartpole/"
     elif args.env == "overcooked":
         dirpath = "./PaperExperiment/Overcooked/"
-    else:
+    elif args.env == "ttt":
         dirpath = "./PaperExperiment/TTT/"
+    elif args.env == "ttt_roles":
+        dirpath = "./PaperExperiment/TTTRoles/"
     dirpath = dirpath + f"algo_{args.algorithm}/"
 
     rew, exprew, hl = run_multi_agent_episodes(
@@ -1090,6 +1199,7 @@ if __name__ == "__main__":
         model_path=dirpath + "model_checkpoints/",
         online=online,
         episodic=episodic,
+        reward_checkpoint_bin=reward_bin,
     )
 
     filename = f"demo_{args.demo}_human_reg{args.supreg}_hf_{args.hum_feedback}_run{args.runid}_"

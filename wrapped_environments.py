@@ -200,3 +200,67 @@ class TTTWrapped(Wrapper):
         action = int(input(f"action for agent [{agent_id}] [1-9]: "))
         self.action = action
         return np.array([self.action])
+
+
+class TTTWrappedRoles(Wrapper):
+    def __init__(
+        self, nfirst=1, n_moves=1, render_mode="", random_op=True, obs_as_array=True
+    ):
+        self.env = TTTNvN(
+            nfirst=nfirst,
+            n_moves=n_moves,
+            render_mode=render_mode,
+            random_op=random_op,
+            obs_as_array=obs_as_array,
+        )
+        self.state = np.zeros((n_moves, 19), dtype=np.float32)
+        self.state[1, 18] = 1
+        self.n_agents = n_moves
+        self.n_actions = 9
+        self.action_space = Action_Space(9)
+        self.action = 0
+
+    def reset(self):
+        st, info = self.env.reset()
+
+        for i in range(self.env.n_moves):
+            self.state[i, 0:18] = st
+        return self.state.copy(), info
+
+    # TODO: make add agent id to the states for role assignment
+
+    def get_state_feature_names(self):
+        return ["1,1", "1,2", "1,3", "2,1", "2,2", "2,3", "3,1", "3,2", "3,3"]
+
+    def get_obs_feature_names(self):
+        return ["1,1", "1,2", "1,3", "2,1", "2,2", "2,3", "3,1", "3,2", "3,3"]
+
+    def get_obs(self):
+        return self.state
+
+    def get_avail_agent_actions(self, agent_id):
+        return None  # TODO: eventually make this return env.get_legal_moves
+
+    def step(self, actions):
+        next_state, reward, terminated, truncated, info = self.env.step(actions)
+        for i in range(self.env.n_moves):
+            self.state[i, 0:18] = next_state
+
+        return (
+            self.state.copy(),
+            reward,
+            terminated,
+            truncated,
+            info,
+        )
+
+    def expert_reward(self, obs):
+        return 0
+
+    def display(self, obs, avail, id):
+        self.env.display_board(self.env.board)
+
+    def human_action(self, obs, avail_actions, agent_id, keys_down):
+        action = int(input(f"action for agent [{agent_id}] [1-9]: "))
+        self.action = action
+        return np.array([self.action])
