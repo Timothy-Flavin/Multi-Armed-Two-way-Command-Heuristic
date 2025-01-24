@@ -37,6 +37,7 @@ def handle_key_event(key_event):
     # print(key_event.name)
 
 
+GREED = True
 # keyboard.hook(handle_key_event)
 
 
@@ -205,7 +206,7 @@ def actions_match(
     for agent_id in range(n_agents):
         # Only choose targets if this is an update round
         if current_step % n_steps == 0:
-            if agent_id == 0:
+            if agent_id == 0 and GREED:
                 target = MATCH[agent_id].choose_target(
                     np.array([0, 100]), np.ones(n_agents)
                 )  # agents are always alive here
@@ -241,7 +242,8 @@ def actions_match(
             )
             if agent_id == 0:
                 action, commander = MATCH[agent_id].policy_with_oracle(
-                    command_recipients[agent_id] * 0, command_contents[agent_id]
+                    command_recipients[agent_id] * int(not GREED),
+                    command_contents[agent_id],
                 )
             else:
                 action, commander = MATCH[agent_id].policy_with_oracle(
@@ -920,63 +922,71 @@ if __name__ == "__main__":
         for i, rp in enumerate(res_paths):
             for d in dir_lists[i]:
                 # if d[-1] != "0":
-                if d[-1] != "0":
+                print(d[2:6].replace("_", ""))
+                if float(d[2:6].replace("_", "")) <= 0.8:
                     continue
-                print(d)
+                # if d[-1] != "0":
+                # continue
+                # print(d)
                 if os.path.isdir(rp + d):
                     print(f"is dir: {rp+d}")
                     model_dirs.append(rp + d)
-                    graph_names.append(d[0:6] + model_fams[i])
+                    graph_names.append(d[0:6] + "_" + d[-1] + model_fams[i])
                     algos.append(model_fams[i])
 
         # sort model names dir names and algos by float(modeldirs[i][2:5])
+
+        for md in graph_names:
+            print(md)
+            print(md[8:11])
+            print(float(md[2:5]) + (1000 if md[8:11] == "MDQ" else 0))
+
+        if False:
+            model_dirs = [
+                x
+                for _, x in sorted(
+                    zip(
+                        [
+                            (float(md[2:5]) + (1000 if md[8:11] == "MDQ" else 0))
+                            for md in graph_names
+                        ],
+                        model_dirs,
+                    )
+                )
+            ]
+
+            algos = [
+                x
+                for _, x in sorted(
+                    zip(
+                        [
+                            (float(md[2:5]) + (1000 if md[8:11] == "MDQ" else 0))
+                            for md in graph_names
+                        ],
+                        algos,
+                    )
+                )
+            ]
+            graph_names = [
+                x
+                for _, x in sorted(
+                    zip(
+                        [
+                            (float(md[2:5]) + (1000 if md[8:11] == "MDQ" else 0))
+                            for md in graph_names
+                        ],
+                        graph_names,
+                    )
+                )
+            ]
+
         print(model_dirs)
         print(graph_names)
         print(algos)
-        for md in graph_names:
-            print(md[6:9])
-            print(float(md[2:5]) + (1000 if md[6:9] == "MDQ" else 0))
 
-        model_dirs = [
-            x
-            for _, x in sorted(
-                zip(
-                    [
-                        (float(md[2:5]) + (1000 if md[6:9] == "MDQ" else 0))
-                        for md in graph_names
-                    ],
-                    model_dirs,
-                )
-            )
-        ]
-
-        algos = [
-            x
-            for _, x in sorted(
-                zip(
-                    [
-                        (float(md[2:5]) + (1000 if md[6:9] == "MDQ" else 0))
-                        for md in graph_names
-                    ],
-                    algos,
-                )
-            )
-        ]
-        graph_names = [
-            x
-            for _, x in sorted(
-                zip(
-                    [
-                        (float(md[2:5]) + (1000 if md[6:9] == "MDQ" else 0))
-                        for md in graph_names
-                    ],
-                    graph_names,
-                )
-            )
-        ]
-
-        # input("huh")
+        input("huh")
         the_agents = get_agent(obs, args, device, n_actions)
+        the_agents2 = get_agent(obs, args, device, n_actions)
         scores = np.zeros((len(model_dirs), len(model_dirs)))
 
         h_mem = FlexibleBuffer(
@@ -1000,17 +1010,17 @@ if __name__ == "__main__":
         for i in range(len(model_dirs)):
             for j in range(0, len(model_dirs)):
                 print(f"loading {model_dirs[i]}")
-                a1: Agent = the_agents[algos[i]]
+                a1: Agent = the_agents[algos[i]]  # fix this
                 a1.load(model_dirs[i] + "/")
                 a1.eval_mode = True
                 print(f"loading {model_dirs[j]}")
-                a2: Agent = the_agents[algos[j]]
+                a2: Agent = the_agents2[algos[j]]
                 a2.load(model_dirs[j] + "/")
                 a2.eval_mode = True
 
                 rew, er, hl = run_multi_agent_episodes(
                     env=env,
-                    models=[a2, a1],
+                    models=[a1, a2],
                     n_agents=2,
                     episode_type=Episode_Type.EVAL,
                     memory=h_mem,
@@ -1021,7 +1031,7 @@ if __name__ == "__main__":
                     n_step=int(args.n_step),
                 )
                 scores[i, j] = np.array(rew).mean()
-                print(scores)
+                print(scores[i])
                 print(f"{i*len(model_dirs)+j}/{len(model_dirs)**2}")
 
         fig, ax = plt.subplots()
