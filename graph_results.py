@@ -83,7 +83,7 @@ def plot_performance(
     axes[1].set_xlabel("Episode")
     axes[1].set_ylim(0, 1)
     if env == "Overcooked":
-        axes[0].set_ylim(0, 120)
+        axes[0].set_ylim(0, 160)
     else:
         axes[0].set_ylim(-1, 1)
     axes[0].grid()
@@ -107,10 +107,11 @@ if __name__ == "__main__":
                         er = []
                         for runid in range(5):
                             filename = f"demo_{demo}_human_reg{supreg}_hf_{hum_feedback}_run{runid}_"
-                            print(dirpath + filename)
+
                             if os.path.exists(
                                 dirpath + filename + "human_likeness.npy"
                             ):
+                                print(dirpath + filename)
                                 hl.append(
                                     np.load(dirpath + filename + "human_likeness.npy")
                                 )

@@ -220,10 +220,12 @@ def actions_match(
             print(f"aid: {agent_id} chose: {target} to command")
 
         command_recipients[target, agent_id] = 1
-        act, lp, qv = MATCH[agent_id].agent.train_actions(obs[target], la[target])
+        act, _, lp, __, qv = MATCH[agent_id].agent.train_actions(
+            obs[target], la[target]
+        )
         command_contents[target, agent_id] = act
         if target != agent_id:  # action commanded to itself if it didnt just
-            act, lp, qv = MATCH[agent_id].agent.train_actions(
+            act, _, lp, __, qv = MATCH[agent_id].agent.train_actions(
                 obs[agent_id], la[agent_id]
             )
             command_contents[agent_id, agent_id] = act
@@ -340,7 +342,9 @@ def run_multi_agent_episodes(
     n_step=5,
     online=False,
 ):
-    print(f"Running {episode_type} episodes online: {online}, episodic: {episodic}")
+    print(
+        f"Running {episode_type} episodes online: {online}, episodic: {episodic} ms:{max_steps}"
+    )
     # input()
     current_episode = 0
     current_episode_step = 0
@@ -435,7 +439,9 @@ def run_multi_agent_episodes(
                 er = env.expert_reward(obs)
                 ep_expert_reward_hist[current_episode] += er
 
+            # print(actions)
             actions = actions.reshape([actions.shape[0], 1])
+            # print(actions)
             # print(env.env)
 
             if episode_type != Episode_Type.EVAL:
@@ -454,23 +460,25 @@ def run_multi_agent_episodes(
                 )
 
             if episode_type == Episode_Type.RL:
+                inds = np.arange(n_agents)
+                np.random.shuffle(inds)
                 # if episodic:
-                if online and memory.steps_recorded > 511:
+                if online and memory.steps_recorded > 999:
                     exp = memory.sample_transitions(
                         as_torch=True,
                         device=device,
                         idx=np.arange(0, memory.steps_recorded),
                     )
-                    for agent_id in range(n_agents):
+                    for agent_id in inds:
                         aloss, closs = models[agent_id].reinforcement_learn(
-                            batch=exp, critic_only=agent_id
+                            batch=exp, agent_num=agent_id
                         )
                     memory.reset()
                     loss_hist[-1] += closs
 
                 elif not online and memory.steps_recorded > 255:
                     exp = memory.sample_transitions(256, as_torch=True, device=device)
-                    for agent_id in range(n_agents):
+                    for agent_id in inds:
                         aloss, closs = models[agent_id].reinforcement_learn(
                             exp, agent_id
                         )
@@ -486,6 +494,7 @@ def run_multi_agent_episodes(
                     )
 
             if episode_type == Episode_Type.RAND:
+                print("yeehaw")
                 if learn_during_rand:
                     for agent_id in range(n_agents):
                         exp = memory.sample_episodes(256, as_torch=True, device=device)
@@ -694,43 +703,90 @@ def offline_update(models: list[Agent], n, memory: FlexibleBuffer, verbose=False
 
 def get_agent(obs, args, device, n_actions):
     return {
-        "PPO": PG(
-            obs_dim=obs.shape[0],
-            discrete_action_dims=[n_actions],
-            continuous_action_dim=0,  # continuous_env.action_space.shape[0],
-            hidden_dims=np.array([64, 64]),
-            min_actions=0,  # continuous_env.action_space.low,
-            max_actions=0,  # continuous_env.action_space.high,
-            gamma=0.99,
-            device="cuda",
-            entropy_loss=0.01,
-            mini_batch_size=64,
-            n_epochs=4,
-            lr=3e-4,
-            advantage_type="gae",
-            norm_advantages=False,
-            anneal_lr=1000000,
-            value_loss_coef=0.5,  # 5,
-            ppo_clip=0.2,
-            value_clip=0.5,
-            orthogonal=True,
-            activation="tanh",
-            starting_actorlogstd=0,
-            gae_lambda=0.95,
-        ),
         "DQ": DQN(
             obs_dim=obs.shape[1],
-            continuous_action_dims=None,  # continuous_env.action_space.shape[0],
+            continuous_action_dims=0,  # continuous_env.action_space.shape[0],
             max_actions=None,  # continuous_env.action_space.high,
             min_actions=None,  # continuous_env.action_space.low,
             discrete_action_dims=[n_actions],
             hidden_dims=[64, 64],
-            device="cuda:0",
-            lr=3e-4,
+            device=device,
+            lr=1e-4,
             activation="relu",
             dueling=True,
             n_c_action_bins=0,
-            eps_decay_half_life=3000,
+        ),
+        "SDQ": DQN(
+            obs_dim=obs.shape[1],
+            continuous_action_dims=0,  # continuous_env.action_space.shape[0],
+            max_actions=None,  # continuous_env.action_space.high,
+            min_actions=None,  # continuous_env.action_space.low,
+            discrete_action_dims=[n_actions],
+            hidden_dims=[64, 64],
+            device=device,
+            lr=1e-4,
+            activation="relu",
+            dueling=True,
+            n_c_action_bins=0,
+            entropy=0.03,
+        ),
+        "MDQ": DQN(
+            obs_dim=obs.shape[1],
+            continuous_action_dims=0,  # continuous_env.action_space.shape[0],
+            max_actions=None,  # continuous_env.action_space.high,
+            min_actions=None,  # continuous_env.action_space.low,
+            discrete_action_dims=[n_actions],
+            hidden_dims=[64, 64],
+            device=device,
+            lr=1e-4,
+            activation="relu",
+            dueling=True,
+            n_c_action_bins=0,
+            entropy=0.03,
+            munchausen=0.9,
+        ),
+        "PPO": PG(
+            obs_dim=obs.shape[1],
+            discrete_action_dims=[n_actions],
+            # continuous_action_dim=continuous_env.action_space.shape[0],
+            hidden_dims=np.array([96, 64]),
+            # min_actions=continuous_env.action_space.low,
+            # max_actions=continuous_env.action_space.high,
+            gamma=0.977,
+            device=device,
+            entropy_loss=0.001,
+            mini_batch_size=256,
+            n_epochs=4,
+            lr=1e-3,
+            advantage_type="gae",
+            norm_advantages=True,
+            anneal_lr=2000000,
+            value_loss_coef=0.05,
+            ppo_clip=0.15,
+            # value_clip=0.5,
+            orthogonal=True,
+            activation="tanh",
+            starting_actorlogstd=0,
+            gae_lambda=0.8,
+        ),
+        "PG": PG(
+            obs_dim=obs.shape[1],
+            discrete_action_dims=[n_actions],
+            hidden_dims=np.array([64, 64]),
+            gamma=0.99,
+            device=device,
+            entropy_loss=0.01,
+            mini_batch_size=64,
+            n_epochs=1,
+            lr=3e-4,
+            advantage_type="gae",
+            norm_advantages=False,
+            anneal_lr=200000,
+            value_loss_coef=0.5,
+            orthogonal=True,
+            activation="tanh",
+            starting_actorlogstd=0,
+            gae_lambda=0.95,
         ),
     }
 
@@ -799,14 +855,14 @@ if __name__ == "__main__":
         n_actions = env.n_actions
         n_agents = env.n_agents
         obs, states = env.reset()
-        results_path += "Cartpole/memories/"
+        results_path += "Cartpole/"
 
     elif args.env == "matrix":
         # env = MatrixGame()
         n_actions = 2
         n_agents = 2
         # obs, states = env.reset()
-        results_path += "Matrix/memories/"
+        results_path += "Matrix/"
 
     elif args.env == "ttt":
         env = TTTWrapped(
@@ -814,7 +870,7 @@ if __name__ == "__main__":
         )
         n_actions = 9
         n_agents = 2
-        results_path += "TTT/memories"
+        results_path += "TTT/"
         obs, info = env.reset()
         reward_bin = [
             0.0,
@@ -832,7 +888,7 @@ if __name__ == "__main__":
         )
         n_actions = 9
         n_agents = 2
-        results_path += "TTTRoles/memories"
+        results_path += "TTTRoles/"
         obs, info = env.reset()
         reward_bin = [
             0.0,
@@ -849,29 +905,77 @@ if __name__ == "__main__":
     device = torch.device(args.cuda_device if torch.cuda.is_available() else "cpu")
 
     if args.evaluate_pairwise:
-        model_fams = ["PPO", "DQ"]
+        model_fams = ["PPO", "MDQ"]
         res_paths = []
         dir_lists = []
         for r in model_fams:
-            res_paths.append(
-                results_path + f"{arg_to_env_str[args.env]}/algo_{r}/model_checkpoints/"
-            )
+            res_paths.append(results_path + f"algo_{r}/model_checkpoints/")
             dir_lists.append(os.listdir(res_paths[-1]))
         model_dirs = []
         graph_names = []
         algos = []
-
+        # print(res_paths)
+        # print(dir_lists)
+        # input("hmm")
         for i, rp in enumerate(res_paths):
             for d in dir_lists[i]:
+                # if d[-1] != "0":
+                if d[-1] != "0":
+                    continue
                 print(d)
                 if os.path.isdir(rp + d):
+                    print(f"is dir: {rp+d}")
                     model_dirs.append(rp + d)
-                    graph_names.append(d + model_fams[i])
+                    graph_names.append(d[0:6] + model_fams[i])
                     algos.append(model_fams[i])
 
+        # sort model names dir names and algos by float(modeldirs[i][2:5])
         print(model_dirs)
         print(graph_names)
         print(algos)
+        for md in graph_names:
+            print(md[6:9])
+            print(float(md[2:5]) + (1000 if md[6:9] == "MDQ" else 0))
+
+        model_dirs = [
+            x
+            for _, x in sorted(
+                zip(
+                    [
+                        (float(md[2:5]) + (1000 if md[6:9] == "MDQ" else 0))
+                        for md in graph_names
+                    ],
+                    model_dirs,
+                )
+            )
+        ]
+
+        algos = [
+            x
+            for _, x in sorted(
+                zip(
+                    [
+                        (float(md[2:5]) + (1000 if md[6:9] == "MDQ" else 0))
+                        for md in graph_names
+                    ],
+                    algos,
+                )
+            )
+        ]
+        graph_names = [
+            x
+            for _, x in sorted(
+                zip(
+                    [
+                        (float(md[2:5]) + (1000 if md[6:9] == "MDQ" else 0))
+                        for md in graph_names
+                    ],
+                    graph_names,
+                )
+            )
+        ]
+
+        # input("huh")
         the_agents = get_agent(obs, args, device, n_actions)
         scores = np.zeros((len(model_dirs), len(model_dirs)))
 
@@ -898,24 +1002,27 @@ if __name__ == "__main__":
                 print(f"loading {model_dirs[i]}")
                 a1: Agent = the_agents[algos[i]]
                 a1.load(model_dirs[i] + "/")
+                a1.eval_mode = True
                 print(f"loading {model_dirs[j]}")
                 a2: Agent = the_agents[algos[j]]
                 a2.load(model_dirs[j] + "/")
+                a2.eval_mode = True
 
                 rew, er, hl = run_multi_agent_episodes(
-                    env,
-                    [a1, a2],
-                    2,
-                    Episode_Type.EVAL,
-                    h_mem,
-                    None,
-                    50 * 200,
-                    MATCH=True,
+                    env=env,
+                    models=[a2, a1],
+                    n_agents=2,
+                    episode_type=Episode_Type.EVAL,
+                    memory=h_mem,
+                    imitation_memory=h_mem,
+                    max_steps=(10 if args.env not in ["ttt", "ttt_roles"] else 5) * 200,
+                    MATCH=None,
                     n_shot=int(args.n_shot),
                     n_step=int(args.n_step),
                 )
                 scores[i, j] = np.array(rew).mean()
                 print(scores)
+                print(f"{i*len(model_dirs)+j}/{len(model_dirs)**2}")
 
         fig, ax = plt.subplots()
         im = ax.imshow(scores)
@@ -1021,27 +1128,28 @@ if __name__ == "__main__":
             obs_dim=obs.shape[1],
             discrete_action_dims=[env.action_space.n],
             # continuous_action_dim=continuous_env.action_space.shape[0],
-            hidden_dims=np.array([64, 64]),
+            hidden_dims=np.array([96, 64]),
             # min_actions=continuous_env.action_space.low,
             # max_actions=continuous_env.action_space.high,
-            gamma=0.99,
+            gamma=0.977,
             device="cuda",
-            entropy_loss=0.01,
-            mini_batch_size=64,
+            entropy_loss=0.001,
+            mini_batch_size=256,
             n_epochs=4,
-            lr=3e-4,
+            lr=1e-3,
             advantage_type="gae",
-            norm_advantages=False,
-            anneal_lr=200000,
-            value_loss_coef=0.5,
-            ppo_clip=0.2,
+            norm_advantages=True,
+            anneal_lr=2000000,
+            value_loss_coef=0.05,
+            ppo_clip=0.15,
             # value_clip=0.5,
             orthogonal=True,
             activation="tanh",
             starting_actorlogstd=0,
-            gae_lambda=0.95,
+            gae_lambda=0.8,
         )
-
+        # model=PG.load()
+        # model.eval_mode = True
         online = True
 
     if args.algorithm == "PG":
