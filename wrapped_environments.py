@@ -1,5 +1,5 @@
 from env_wrapper import Wrapper, Action_Space
-from fasttttsandbox import TTTNvN
+from fasttttsandbox import TTTNvN, TTTLeverGame
 import numpy as np
 import gym
 import time
@@ -248,6 +248,64 @@ class TTTWrappedRoles(Wrapper):
 
         return (
             self.state.copy(),
+            reward,
+            terminated,
+            truncated,
+            info,
+        )
+
+    def expert_reward(self, obs):
+        return 0
+
+    def display(self, obs, avail, id):
+        self.env.display_board(self.env.board)
+
+    def human_action(self, obs, avail_actions, agent_id, keys_down):
+        action = int(input(f"action for agent [{agent_id}] [1-9]: "))
+        self.action = action
+        return np.array([self.action])
+
+
+class TTTLeverWrapped(Wrapper):
+    def __init__(
+        self, nfirst=1, n_moves=1, render_mode="", random_op=True, obs_as_array=True
+    ):
+        self.env = TTTLeverGame(
+            n_moves=n_moves,
+            render_mode=render_mode,
+            random_op=random_op,
+            obs_as_array=obs_as_array,
+        )
+        self.state = np.zeros(18, dtype=np.float32)
+        self.n_agents = n_moves
+        self.n_actions = 9
+        self.action_space = Action_Space(9)
+        self.action = 0
+
+    def reset(self):
+        self.state, info = self.env.reset()
+        return np.array([self.state] * self.env.n_moves), info
+
+    # TODO: make add agent id to the states for role assignment
+
+    def get_state_feature_names(self):
+        return ["1,1", "1,2", "1,3", "2,1", "2,2", "2,3", "3,1", "3,2", "3,3"]
+
+    def get_obs_feature_names(self):
+        return ["1,1", "1,2", "1,3", "2,1", "2,2", "2,3", "3,1", "3,2", "3,3"]
+
+    def get_obs(self):
+        return [self.state] * self.env.n_moves
+
+    def get_avail_agent_actions(self, agent_id):
+        return None  # TODO: eventually make this return env.get_legal_moves
+
+    def step(self, actions):
+        next_state, reward, terminated, truncated, info = self.env.step(actions)
+
+        self.state = next_state
+        return (
+            np.array([self.state] * self.env.n_moves),
             reward,
             terminated,
             truncated,

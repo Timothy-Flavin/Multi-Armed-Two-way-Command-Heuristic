@@ -12,6 +12,7 @@ from wrapped_environments import (
     Wrapper,
     TTTWrapped,
     TTTWrappedRoles,
+    TTTLeverWrapped,
 )  # cartpole env for testing
 from enum import Enum
 from flexibuff import FlexibleBuffer, FlexiBatch
@@ -813,7 +814,7 @@ if __name__ == "__main__":
         "-e",
         "--env",
         action="store",
-        choices=["cartpole", "overcooked", "ttt", "ttt_roles"],
+        choices=["cartpole", "overcooked", "ttt", "ttt_roles", "ttt_lever"],
     )
     parser.add_argument("-r", "--record", action="store_true")
     parser.add_argument("-sr", "--supreg", action="store_true")
@@ -838,6 +839,7 @@ if __name__ == "__main__":
         "overcooked": "Overcooked",
         "ttt": "TTT",
         "ttt_roles": "TTTRoles",
+        "ttt_lever": "TTTLever",
     }
     results_path = "./PaperExperiment/"
     if args.env == "sc2":
@@ -886,6 +888,24 @@ if __name__ == "__main__":
         ]
     elif args.env == "ttt_roles":
         env = TTTWrappedRoles(
+            nfirst=2, n_moves=2, render_mode=None, random_op=True, obs_as_array=True
+        )
+        n_actions = 9
+        n_agents = 2
+        results_path += "TTTRoles/"
+        obs, info = env.reset()
+        reward_bin = [
+            0.0,
+            0.2,
+            0.4,
+            0.6,
+            0.7,
+            0.8,
+            0.9,
+            0.95,
+        ]
+    elif args.env == "ttt_lever":
+        env = TTTLeverWrapped(
             nfirst=2, n_moves=2, render_mode=None, random_op=True, obs_as_array=True
         )
         n_actions = 9
