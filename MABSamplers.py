@@ -69,14 +69,16 @@ class Thompson_Multinomial(MAB_Sampler):
             print(
                 f"Sampled adv: {int(advantage>0)*abs(advantage)}, non sampled adv: {int(advantage<0)*abs(advantage)/norm}"
             )
+
         self.advantageCounts[self.sampled] += int(advantage > 0) * abs(advantage)
-        self.advantageCounts[: self.sampled] += (
-            int(advantage < 0) * abs(advantage) / norm
+        self.advantageCounts[: self.sampled] = (
+            self.advantageCounts[: self.sampled]
+            + (advantage < 0) * abs(advantage) / norm
         )
         if self.sampled < self.advantageCounts.shape[0] - 1:
-            self.advantageCounts[self.sampled + 1 :] += (
-                int(advantage < 0) * abs(advantage) / norm
-            )
+            self.advantageCounts[self.sampled + 1 :] = self.advantageCounts[
+                self.sampled + 1 :
+            ] + (int(advantage < 0) * abs(advantage) / norm)
         self.advantageCounts *= 0.9
         if verbose > 0:
             print(self.advantageCounts)

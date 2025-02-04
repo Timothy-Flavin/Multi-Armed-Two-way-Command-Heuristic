@@ -96,7 +96,7 @@ def plot_performance(
 
 
 if __name__ == "__main__":
-    for env in ["TTT", "Overcooked", "TTTRoles"]:
+    for env in ["TTT", "Overcooked", "TTTRoles", "TTTLever"]:
         for algo in ["DQ", "PPO", "SDQ", "MDQ", "PG"]:
             dirpath = f"./PaperExperiment/{env}/" + f"algo_{algo}/"
             for demo in [True, False]:

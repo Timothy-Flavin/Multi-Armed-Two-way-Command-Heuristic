@@ -188,7 +188,12 @@ def actions_match(
                 print(
                     f"target + disc ev: {target} where previous value: {MATCH[agent_id].value} for listening to {MATCH[agent_id].leader}"
                 )
-            MATCH[agent_id].update_listener(target - MATCH[agent_id].value)
+            if torch.is_tensor(target):
+                target = target.cpu().item()
+            value = MATCH[agent_id].value
+            if torch.is_tensor(value):
+                value = value.cpu().item()
+            MATCH[agent_id].update_listener(target - value)
             MATCH[agent_id].reward = []
             MATCH[agent_id].value = 0
         if verbose:
@@ -650,10 +655,10 @@ def run_multi_agent_episodes(
 
         current_episode += 1
 
-        if MATCH:
-            print("Samplers summary: ")
-            for aid in range(n_agents):
-                MATCH_Wrappers[aid].final_dir(prior=None)
+        # if MATCH:
+        # print("Samplers summary: ")
+        # for aid in range(n_agents):
+        #    MATCH_Wrappers[aid].final_dir(prior=None)
     if (
         episode_type == Episode_Type.RL
         or episode_type == Episode_Type.RAND
@@ -910,7 +915,7 @@ if __name__ == "__main__":
         )
         n_actions = 9
         n_agents = 2
-        results_path += "TTTRoles/"
+        results_path += "TTTLever/"
         obs, info = env.reset()
         reward_bin = [
             0.0,
@@ -930,9 +935,27 @@ if __name__ == "__main__":
         model_fams = ["PPO", "MDQ"]
         res_paths = []
         dir_lists = []
-        for r in model_fams:
-            res_paths.append(results_path + f"algo_{r}/model_checkpoints/")
-            dir_lists.append(os.listdir(res_paths[-1]))
+        paths = open("model_paths.txt", "r").readlines()
+        i = 0
+        while i < len(paths):
+            print(paths[i], "  respaths")
+            if paths[i] == "" or paths[i] == "\n":
+                i += 1
+                break
+            res_paths.append(paths[i].replace("\n", ""))
+            dir_lists.append([])
+            i += 1
+        for j in range(len(dir_lists)):
+            while i < len(paths):
+                print(paths[i].replace("\n", ""))
+                if paths[i] == "" or paths[i] == "\n":
+                    i += 1
+                    break
+                dir_lists[j].append(paths[i].replace("\n", ""))
+                i += 1
+        # for r in model_fams:
+        # res_paths.append(results_path + f"algo_{r}/model_checkpoints/")
+        # dir_lists.append(os.listdir(res_paths[-1]))
         model_dirs = []
         graph_names = []
         algos = []
@@ -943,7 +966,7 @@ if __name__ == "__main__":
             for d in dir_lists[i]:
                 # if d[-1] != "0":
                 print(d[2:6].replace("_", ""))
-                if float(d[2:6].replace("_", "")) <= 0.8:
+                if float(d[2:6].replace("_", "")) <= 0.7:
                     continue
                 # if d[-1] != "0":
                 # continue
@@ -961,7 +984,7 @@ if __name__ == "__main__":
             print(md[8:11])
             print(float(md[2:5]) + (1000 if md[8:11] == "MDQ" else 0))
 
-        if False:
+        if True:
             model_dirs = [
                 x
                 for _, x in sorted(
@@ -1046,7 +1069,7 @@ if __name__ == "__main__":
                     memory=h_mem,
                     imitation_memory=h_mem,
                     max_steps=(10 if args.env not in ["ttt", "ttt_roles"] else 5) * 200,
-                    MATCH=None,
+                    MATCH=True,
                     n_shot=int(args.n_shot),
                     n_step=int(args.n_step),
                 )
@@ -1322,6 +1345,8 @@ if __name__ == "__main__":
         dirpath = "./PaperExperiment/TTT/"
     elif args.env == "ttt_roles":
         dirpath = "./PaperExperiment/TTTRoles/"
+    elif args.env == "ttt_lever":
+        dirpath = "./PaperExperiment/TTTLever/"
     dirpath = dirpath + f"algo_{args.algorithm}/"
 
     rew, exprew, hl = run_multi_agent_episodes(
