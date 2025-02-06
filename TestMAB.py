@@ -799,59 +799,7 @@ def get_agent(obs, args, device, n_actions):
     }
 
 
-if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser(
-        prog="Multi-Agent Experiment Runner",
-        description="This program trains MARL models \
-            on wrapped environments with additional human \
-            data. The effects of the human data curation \
-            are then recorded and graphed for comparison",
-        epilog="Text at the bottom of help",
-    )
-
-    parser.add_argument("-d", "--demo", action="store_true")
-    parser.add_argument("-hf", "--hum_feedback", action="store_true")
-    parser.add_argument(
-        "-a", "--algorithm", action="store", choices=["PPO", "DQ", "SDQ", "MDQ", "PG"]
-    )
-    parser.add_argument(
-        "-e",
-        "--env",
-        action="store",
-        choices=["cartpole", "overcooked", "ttt", "ttt_roles", "ttt_lever"],
-    )
-    parser.add_argument("-r", "--record", action="store_true")
-    parser.add_argument("-sr", "--supreg", action="store_true")
-    parser.add_argument("-m", "--mix", action="store_true")
-    parser.add_argument("-rid", "--runid", action="store", default=0)
-    parser.add_argument("-nsh", "--n_shot", action="store", default=0)
-    parser.add_argument("-nst", "--n_step", action="store", default=0)
-    parser.add_argument("-rls", "--rlsteps", action="store", default=1000)
-    parser.add_argument("-rands", "--randsteps", action="store", default=0)
-    parser.add_argument("-egr", "--egreedy", action="store", default=0)
-    parser.add_argument("-g", "--graph", action="store_true")
-    parser.add_argument(
-        "-cuda", "--cuda_device", action="store", choices=["cuda:0", "cuda:1", "cpu"]
-    )
-    parser.add_argument("-eval", "--evaluate_pairwise", action="store_true")
-
-    args = parser.parse_args()
-
-    reward_bin = []
-    arg_to_env_str = {
-        "cartpole": "Cartpole",
-        "overcooked": "Overcooked",
-        "ttt": "TTT",
-        "ttt_roles": "TTTRoles",
-        "ttt_lever": "TTTLever",
-    }
-    results_path = "./PaperExperiment/"
-    if args.env == "sc2":
-        # env, n_actions, n_agents = get_sc2_env()
-        # obs, states = env.reset()
-        results_path += "SC2/memories/"
-
+def get_env(args, results_path):
     if args.env == "overcooked":
         env = OvercookWrapped(render=True)
         obs = env.get_obs()
@@ -865,13 +813,6 @@ if __name__ == "__main__":
         n_agents = env.n_agents
         obs, states = env.reset()
         results_path += "Cartpole/"
-
-    elif args.env == "matrix":
-        # env = MatrixGame()
-        n_actions = 2
-        n_agents = 2
-        # obs, states = env.reset()
-        results_path += "Matrix/"
 
     elif args.env == "ttt":
         env = TTTWrapped(
@@ -927,160 +868,222 @@ if __name__ == "__main__":
             0.9,
             0.95,
         ]
+    return env, n_actions, n_agents, results_path, obs, reward_bin
 
-    print(env.get_state_feature_names())
-    device = torch.device(args.cuda_device if torch.cuda.is_available() else "cpu")
 
-    if args.evaluate_pairwise:
-        model_fams = ["PPO", "MDQ"]
-        res_paths = []
-        dir_lists = []
-        paths = open("model_paths.txt", "r").readlines()
-        i = 0
+def organize_models(args):
+    res_paths = []
+    dir_lists = []
+    paths = open(args.model_paths, "r").readlines()
+    i = 0
+    while i < len(paths):
+        print(paths[i], "  respaths")
+        if paths[i] == "" or paths[i] == "\n":
+            i += 1
+            break
+        res_paths.append(paths[i].replace("\n", ""))
+        dir_lists.append([])
+        i += 1
+    for j in range(len(dir_lists)):
         while i < len(paths):
-            print(paths[i], "  respaths")
+            print(paths[i].replace("\n", ""))
             if paths[i] == "" or paths[i] == "\n":
                 i += 1
                 break
-            res_paths.append(paths[i].replace("\n", ""))
-            dir_lists.append([])
+            dir_lists[j].append(paths[i].replace("\n", ""))
             i += 1
-        for j in range(len(dir_lists)):
-            while i < len(paths):
-                print(paths[i].replace("\n", ""))
-                if paths[i] == "" or paths[i] == "\n":
-                    i += 1
-                    break
-                dir_lists[j].append(paths[i].replace("\n", ""))
-                i += 1
-        # for r in model_fams:
-        # res_paths.append(results_path + f"algo_{r}/model_checkpoints/")
-        # dir_lists.append(os.listdir(res_paths[-1]))
-        model_dirs = []
-        graph_names = []
-        algos = []
-        # print(res_paths)
-        # print(dir_lists)
-        # input("hmm")
-        for i, rp in enumerate(res_paths):
-            for d in dir_lists[i]:
-                # if d[-1] != "0":
-                print(d[2:6].replace("_", ""))
-                if float(d[2:6].replace("_", "")) <= 0.7:
-                    continue
-                # if d[-1] != "0":
-                # continue
-                # print(d)
-                if os.path.isdir(rp + d):
-                    print(f"is dir: {rp+d}")
-                    model_dirs.append(rp + d)
-                    graph_names.append(d[0:6] + "_" + d[-1] + model_fams[i])
-                    algos.append(model_fams[i])
 
-        # sort model names dir names and algos by float(modeldirs[i][2:5])
+    model_dirs = []
+    graph_names = []
+    algos = []
+    # print(res_paths)
+    # print(dir_lists)
+    # input("hmm")
+    for i, rp in enumerate(res_paths):
+        for d in dir_lists[i]:
+            # if d[-1] != "0":
+            print(d[2:6].replace("_", ""))
+            if float(d[2:6].replace("_", "")) <= 0.7:
+                continue
+            # if d[-1] != "0":
+            # continue
+            # print(d)
+            if os.path.isdir(rp + d):
+                print(f"is dir: {rp+d}")
+                model_dirs.append(rp + d)
+                graph_names.append(d[0:6] + "_" + d[-1] + model_fams[i])
+                algos.append(model_fams[i])
 
-        for md in graph_names:
-            print(md)
-            print(md[8:11])
-            print(float(md[2:5]) + (1000 if md[8:11] == "MDQ" else 0))
+    # sort model names dir names and algos by float(modeldirs[i][2:5])
 
-        if True:
-            model_dirs = [
-                x
-                for _, x in sorted(
-                    zip(
-                        [
-                            (float(md[2:5]) + (1000 if md[8:11] == "MDQ" else 0))
-                            for md in graph_names
-                        ],
-                        model_dirs,
-                    )
+    for md in graph_names:
+        print(md)
+        print(md[8:11])
+        print(float(md[2:5]) + (1000 if md[8:11] == "MDQ" else 0))
+
+    if True:
+        model_dirs = [
+            x
+            for _, x in sorted(
+                zip(
+                    [
+                        (float(md[2:5]) + (1000 if md[8:11] == "MDQ" else 0))
+                        for md in graph_names
+                    ],
+                    model_dirs,
                 )
-            ]
+            )
+        ]
 
-            algos = [
-                x
-                for _, x in sorted(
-                    zip(
-                        [
-                            (float(md[2:5]) + (1000 if md[8:11] == "MDQ" else 0))
-                            for md in graph_names
-                        ],
-                        algos,
-                    )
+        algos = [
+            x
+            for _, x in sorted(
+                zip(
+                    [
+                        (float(md[2:5]) + (1000 if md[8:11] == "MDQ" else 0))
+                        for md in graph_names
+                    ],
+                    algos,
                 )
-            ]
-            graph_names = [
-                x
-                for _, x in sorted(
-                    zip(
-                        [
-                            (float(md[2:5]) + (1000 if md[8:11] == "MDQ" else 0))
-                            for md in graph_names
-                        ],
-                        graph_names,
-                    )
+            )
+        ]
+        graph_names = [
+            x
+            for _, x in sorted(
+                zip(
+                    [
+                        (float(md[2:5]) + (1000 if md[8:11] == "MDQ" else 0))
+                        for md in graph_names
+                    ],
+                    graph_names,
                 )
-            ]
+            )
+        ]
+    return graph_names, model_dirs, algos
 
-        print(model_dirs)
-        print(graph_names)
-        print(algos)
 
-        input("huh")
-        the_agents = get_agent(obs, args, device, n_actions)
-        the_agents2 = get_agent(obs, args, device, n_actions)
-        scores = np.zeros((len(model_dirs), len(model_dirs)))
+if __name__ == "__main__":
 
-        h_mem = FlexibleBuffer(
-            num_steps=5000,
-            track_action_mask=False,
-            discrete_action_cardinalities=[n_actions],
-            path=results_path,
-            name="test_" + args.env,
-            n_agents=n_agents,
-            individual_registered_vars={
-                "discrete_log_probs": ([1], np.float32),
-                "obs": ([obs.shape[1]], np.float32),
-                "obs_": ([obs.shape[1]], np.float32),
-                "discrete_actions": ([1], np.int64),
-            },
-            global_registered_vars={
-                "global_rewards": (None, np.float32),
-                "global_auxiliary_rewards": (None, np.float32),
-            },
-        )
-        for i in range(len(model_dirs)):
-            for j in range(0, len(model_dirs)):
-                print(f"loading {model_dirs[i]}")
-                a1: Agent = the_agents[algos[i]]  # fix this
-                a1.load(model_dirs[i] + "/")
-                a1.eval_mode = True
-                print(f"loading {model_dirs[j]}")
-                a2: Agent = the_agents2[algos[j]]
-                a2.load(model_dirs[j] + "/")
-                a2.eval_mode = True
+    parser = argparse.ArgumentParser(
+        prog="Multi-Agent MAB tuner / runner",
+        description="This program trains MARL models \
+            on wrapped environments with additional human \
+            data. The effects of the human data curation \
+            are then recorded and graphed for comparison",
+        epilog="Text at the bottom of help",
+    )
 
-                rew, er, hl = run_multi_agent_episodes(
-                    env=env,
-                    models=[a1, a2],
-                    n_agents=2,
-                    episode_type=Episode_Type.EVAL,
-                    memory=h_mem,
-                    imitation_memory=h_mem,
-                    max_steps=(10 if args.env not in ["ttt", "ttt_roles"] else 5) * 200,
-                    MATCH=True,
-                    n_shot=int(args.n_shot),
-                    n_step=int(args.n_step),
+    parser.add_argument(
+        "-e",
+        "--env",
+        action="store",
+        choices=["cartpole", "overcooked", "ttt", "ttt_roles", "ttt_lever"],
+    )
+    parser.add_argument("-rid", "--runid", action="store", default=0)
+    parser.add_argument("-nsh", "--n_shot", action="store", default=0)
+    parser.add_argument("-nst", "--n_step", action="store", default=0)
+    parser.add_argument("-rls", "--rlsteps", action="store", default=0)
+    parser.add_argument("-g", "--graph", action="store_true")
+    parser.add_argument(
+        "-cuda", "--cuda_device", action="store", choices=["cuda:0", "cuda:1", "cpu"]
+    )
+    parser.add_argument("-eval", "--evaluate_pairwise", action="store_true")
+    parser.add_argument_group("-m_fams", "--model_families", action="store", nargs="+")
+    parser.add_argument(
+        "-paths", "--model_paths", action="store", default="model_paths.txt"
+    )
+
+    args = parser.parse_args()
+
+    model_fams = args.model_families
+
+    reward_bin = []
+    arg_to_env_str = {
+        "cartpole": "Cartpole",
+        "overcooked": "Overcooked",
+        "ttt": "TTT",
+        "ttt_roles": "TTTRoles",
+        "ttt_lever": "TTTLever",
+    }
+    results_path = "./PaperExperiment/"
+
+    env, n_actions, n_agents, results_path, obs, reward_bin = get_env(
+        args, results_path
+    )
+
+    print(env.get_state_feature_names())
+    for r in model_fams:
+        rp = results_path + f"algo_{r}/model_checkpoints/"
+        print(f"avail results_path: {rp}")
+        print(f"resulting model directories: {os.listdir(rp)}")
+    device = torch.device(args.cuda_device if torch.cuda.is_available() else "cpu")
+
+    graph_names, model_dirs, algos = organize_models()
+
+    the_agents = get_agent(obs, args, device, n_actions)
+    the_agents2 = get_agent(obs, args, device, n_actions)
+    # two sets so we don't accidentally parameter share by loading in-place
+    mean_scores = np.zeros((len(model_dirs), len(model_dirs)))
+    last_scores = np.zeros((len(model_dirs), len(model_dirs)))
+
+    mem = FlexibleBuffer(
+        num_steps=5000,
+        track_action_mask=False,
+        discrete_action_cardinalities=[n_actions],
+        path=results_path,
+        name="test_" + args.env,
+        n_agents=n_agents,
+        individual_registered_vars={
+            "discrete_log_probs": ([1], np.float32),
+            "obs": ([obs.shape[1]], np.float32),
+            "obs_": ([obs.shape[1]], np.float32),
+            "discrete_actions": ([1], np.int64),
+        },
+        global_registered_vars={
+            "global_rewards": (None, np.float32),
+            "global_auxiliary_rewards": (None, np.float32),
+        },
+    )
+    for i in range(len(model_dirs)):
+        for j in range(0, len(model_dirs)):
+            print(f"loading {model_dirs[i]}")
+            a1: Agent = the_agents[algos[i]]  # fix this
+            a1.load(model_dirs[i] + "/")
+            a1.eval_mode = True
+            print(f"loading {model_dirs[j]}")
+            a2: Agent = the_agents2[algos[j]]
+            a2.load(model_dirs[j] + "/")
+            a2.eval_mode = True
+
+            rew, er, hl = run_multi_agent_episodes(
+                env=env,
+                models=[a1, a2],
+                n_agents=2,
+                episode_type=Episode_Type.EVAL,
+                memory=mem,
+                imitation_memory=mem,
+                max_steps=(
+                    10 if args.env not in ["ttt", "ttt_roles", "ttt_lever"] else 5
                 )
-                scores[i, j] = np.array(rew).mean()
-                print(scores[i])
-                print(f"{i*len(model_dirs)+j}/{len(model_dirs)**2}")
+                * 200,
+                MATCH=True,
+                n_shot=int(args.n_shot),
+                n_step=int(args.n_step),
+            )
+            rew = np.array(rew)
+            mean_scores[i, j] = rew.mean()
+            print(mean_scores[i])
+            last_scores = rew[
+                (np.arange(rew.shape[0]) % args.nshot) == (args.nshot - 1)
+            ].mean()
+            print(f"{i*len(model_dirs)+j}/{len(model_dirs)**2}")
 
+    np.save(f"score_trial_greed0_{args.n_shot}_{args.n_step}", mean_scores)
+    # Set ticks and labels
+
+    if args.graph:
         fig, ax = plt.subplots()
-        im = ax.imshow(scores)
-        np.save(f"score_trial_greed0_{args.n_shot}_{args.n_step}", scores)
-        # Set ticks and labels
+        im = ax.imshow(mean_scores)
         ax.set_xticks(np.arange(len(graph_names)))
         ax.set_yticks(np.arange(len(graph_names)))
         ax.set_xticklabels(graph_names)
@@ -1091,255 +1094,6 @@ if __name__ == "__main__":
         plt.title("Scores of different paired agents")
         plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
         plt.show()
-
-        exit()
-
-    h_mem = FlexibleBuffer.load(results_path, "test_" + args.env)
-    if h_mem is None:
-        h_mem = FlexibleBuffer(
-            num_steps=5000,
-            track_action_mask=False,
-            discrete_action_cardinalities=[n_actions],
-            path=results_path,
-            name="test_" + args.env,
-            n_agents=n_agents,
-            individual_registered_vars={
-                "discrete_log_probs": ([1], np.float32),
-                "obs": ([obs.shape[1]], np.float32),
-                "obs_": ([obs.shape[1]], np.float32),
-                "discrete_actions": ([1], np.int64),
-            },
-            global_registered_vars={
-                "global_rewards": (None, np.float32),
-                "global_auxiliary_rewards": (None, np.float32),
-            },
-        )
-    print(h_mem)
-
-    online = False
-    episodic = False
-    # if args.algorithm == "SAC":
-    #     model = SAC(
-    #         obs_size=obs.shape[1],
-    #         action_size=n_actions,
-    #         device=device,
-    #         directory="./SAC_test/",
-    #         mixer=None,
-    #         Q_lr=5e-5,
-    #         Pi_lr=2e-5,
-    #     )
-    #     model.save("bruh")
-    if args.algorithm == "DQ":
-        model = DQN(
-            obs_dim=obs.shape[1],
-            continuous_action_dims=0,  # continuous_env.action_space.shape[0],
-            max_actions=None,  # continuous_env.action_space.high,
-            min_actions=None,  # continuous_env.action_space.low,
-            discrete_action_dims=[env.action_space.n],
-            hidden_dims=[64, 64],
-            device="cuda:0",
-            lr=1e-4,
-            activation="relu",
-            dueling=True,
-            n_c_action_bins=0,
-        )
-
-    if args.algorithm == "SDQ":
-        model = DQN(
-            obs_dim=obs.shape[1],
-            continuous_action_dims=0,  # continuous_env.action_space.shape[0],
-            max_actions=None,  # continuous_env.action_space.high,
-            min_actions=None,  # continuous_env.action_space.low,
-            discrete_action_dims=[env.action_space.n],
-            hidden_dims=[64, 64],
-            device="cuda:0",
-            lr=1e-4,
-            activation="relu",
-            dueling=True,
-            n_c_action_bins=0,
-            entropy=0.03,
-        )
-    if args.algorithm == "MDQ":
-        model = DQN(
-            obs_dim=obs.shape[1],
-            continuous_action_dims=0,  # continuous_env.action_space.shape[0],
-            max_actions=None,  # continuous_env.action_space.high,
-            min_actions=None,  # continuous_env.action_space.low,
-            discrete_action_dims=[env.action_space.n],
-            hidden_dims=[64, 64],
-            device="cuda:0",
-            lr=1e-4,
-            activation="relu",
-            dueling=True,
-            n_c_action_bins=0,
-            entropy=0.03,
-            munchausen=0.9,
-        )
-
-    if args.algorithm == "PPO":
-        model = PG(
-            obs_dim=obs.shape[1],
-            discrete_action_dims=[env.action_space.n],
-            # continuous_action_dim=continuous_env.action_space.shape[0],
-            hidden_dims=np.array([96, 64]),
-            # min_actions=continuous_env.action_space.low,
-            # max_actions=continuous_env.action_space.high,
-            gamma=0.977,
-            device="cuda",
-            entropy_loss=0.001,
-            mini_batch_size=256,
-            n_epochs=4,
-            lr=1e-3,
-            advantage_type="gae",
-            norm_advantages=True,
-            anneal_lr=2000000,
-            value_loss_coef=0.05,
-            ppo_clip=0.15,
-            # value_clip=0.5,
-            orthogonal=True,
-            activation="tanh",
-            starting_actorlogstd=0,
-            gae_lambda=0.8,
-        )
-        # model=PG.load()
-        # model.eval_mode = True
-        online = True
-
-    if args.algorithm == "PG":
-        model = PG(
-            obs_dim=obs.shape[1],
-            discrete_action_dims=[env.action_space.n],
-            hidden_dims=np.array([64, 64]),
-            gamma=0.99,
-            device="cuda",
-            entropy_loss=0.01,
-            mini_batch_size=64,
-            n_epochs=1,
-            lr=3e-4,
-            advantage_type="gae",
-            norm_advantages=False,
-            anneal_lr=200000,
-            value_loss_coef=0.5,
-            orthogonal=True,
-            activation="tanh",
-            starting_actorlogstd=0,
-            gae_lambda=0.95,
-        )
-
-        model.load(
-            "./PaperExperiment/TTT/algo_PPO/model_checkpoints/r_0.95_supregFalse"
-        )
-        model.eval_mode = True
-        online = True
-
-    if args.record:
-        # human_buff(env, h_mem, n_agents=n_agents)
-        if args.env == "cartpole":
-            env = CartpoleWrapped("human")
-        run_multi_agent_episodes(
-            env=env,
-            models=[model, model],
-            n_agents=n_agents,
-            episode_type=Episode_Type.HUMAN,
-            memory=h_mem,
-            max_steps=5000,
-            supervised_reg=args.supreg,
-        )
-        if args.env == "cartpole":
-            env = CartpoleWrapped()
-
-        sb = input("Save buffer to drive?")
-        if sb == "y":
-            FlexibleBuffer.save(h_mem)
-
-    if args.demo:
-        print("Doing offline update 1")
-        off_bell, off_slearn, off_hlikenes = offline_update([model, model], 300, h_mem)
-        # plt.plot(off_bell / np.max(off_bell))
-        # plt.plot(off_hlikenes)
-        # plt.legend([f"off bell {np.max(off_bell)}", "likeness"])
-        # plt.show()
-
-    # r_mem = FlexibleBuffer.load(results_path, "test_" + args.env)
-    r_mem = None
-    if r_mem is None:
-        r_mem = FlexibleBuffer(
-            num_steps=10000,
-            track_action_mask=False,
-            discrete_action_cardinalities=[n_actions],
-            path=results_path,
-            name="test_" + args.env,
-            n_agents=n_agents,
-            individual_registered_vars={
-                "discrete_log_probs": ([1], np.float32),
-                "obs": ([obs.shape[1]], np.float32),
-                "obs_": ([obs.shape[1]], np.float32),
-                "discrete_actions": ([1], np.int64),
-            },
-            global_registered_vars={
-                "global_rewards": (None, np.float32),
-                "global_auxiliary_rewards": (None, np.float32),
-            },
-        )
-    # print(r_mem.obs.shape)
-    # print(r_mem)
-    # exit()
-    if int(args.egreedy) > 0:
-        print("Sampling random trajectories")
-        rew, exprew, hl = run_multi_agent_episodes(
-            env=env,
-            models=[model, model],
-            n_agents=n_agents,
-            episode_type=Episode_Type.EGREEDY,
-            memory=r_mem,
-            max_steps=int(args.egreedy),
-            supervised_reg=False,
-            display=False,
-            graph_progress=args.graph,
-            epsilon=0.1,
-        )
-
-        if args.env == "matrix":
-            print("Done with rand episodes")
-            print(
-                f"Agent 1: {model.utility_function(np.array([[1,0,0,0]]))} {model.utility_function(np.array([[0,1,0,0]])), model.get_value(np.array([[0,0,1,0]]))}"
-            )
-            print(
-                f"Agent 2: {model.utility_function(np.array([[1,0,0,1]]))} {model.utility_function(np.array([[0,1,0,1]])), model.utility_function(np.array([[0,0,1,1]]))}"
-            )
-
-    if int(args.randsteps) > 0:
-        print("Sampling random trajectories")
-        rew, exprew, hl = run_multi_agent_episodes(
-            env=env,
-            models=[model, model],
-            n_agents=n_agents,
-            episode_type=Episode_Type.RAND,
-            memory=r_mem,
-            max_steps=int(args.randsteps),
-            supervised_reg=False,
-            display=False,
-            graph_progress=args.graph,
-        )
-
-        if args.env == "matrix":
-            print("Done with rand episodes")
-            print(
-                f"Agent 1: {model.utility_function(np.array([[1,0,0,0]]))} {model.utility_function(np.array([[0,1,0,0]])), model.get_value(np.array([[0,0,1,0]]))}"
-            )
-            print(
-                f"Agent 2: {model.utility_function(np.array([[1,0,0,1]]))} {model.utility_function(np.array([[0,1,0,1]])), model.utility_function(np.array([[0,0,1,1]]))}"
-            )
-
-    if args.demo and int(args.egreedy) > 0:  # args.demo
-        print("Doing offline update")
-        off_bell, off_slearn, off_hlikenes = offline_update(
-            models=[model, model], n=500, memory=r_mem
-        )
-        # plt.plot(off_bell / np.max(off_bell))
-        # plt.plot(off_hlikenes)
-        # plt.legend([f"off bell {np.max(off_bell)}", "likeness"])
-        # plt.show()
 
     if args.env == "cartpole":
         dirpath = "./PaperExperiment/Cartpole/"

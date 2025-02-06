@@ -30,7 +30,7 @@ def summarize_plot_data(rewards, expert_rewards, human_likeness):
 
 
 def plot_performance(
-    rewards, expert_rewards, human_likeness, dirpath, filename, supreg, hf, algo
+    rewards, expert_rewards, human_likeness, dirpath, filename, supreg, hf, algo, env
 ):
     smr, smer, hlike, smr_sd, smer_sd, hlike_sd = summarize_plot_data(
         rewards, expert_rewards, human_likeness
@@ -82,7 +82,10 @@ def plot_performance(
     axes[1].set_ylabel("Probability")
     axes[1].set_xlabel("Episode")
     axes[1].set_ylim(0, 1)
-    axes[0].set_ylim(0, 120)
+    if env == "Overcooked":
+        axes[0].set_ylim(0, 160)
+    else:
+        axes[0].set_ylim(-1, 1)
     axes[0].grid()
     axes[1].grid()
     # fig = plt.gcf()
@@ -92,19 +95,9 @@ def plot_performance(
     fig.savefig(dirpath + "figures/" + filename)
 
 
-def make_bat():
-    for env in ["Cartpole", "SC2"]:
-        for algo in ["PPO", "PPO"]:
-            for demo in [True, False]:
-                for supreg in [True, False]:
-                    for hum_feedback in [True, False]:
-                        for runid in range(5):
-                            continue
-
-
 if __name__ == "__main__":
-    for env in ["TTT", "Overcooked"]:
-        for algo in ["DQ", "PPO"]:
+    for env in ["TTT", "Overcooked", "TTTRoles", "TTTLever"]:
+        for algo in ["DQ", "PPO", "SDQ", "MDQ", "PG"]:
             dirpath = f"./PaperExperiment/{env}/" + f"algo_{algo}/"
             for demo in [True, False]:
                 for supreg in [True, False]:
@@ -114,10 +107,11 @@ if __name__ == "__main__":
                         er = []
                         for runid in range(5):
                             filename = f"demo_{demo}_human_reg{supreg}_hf_{hum_feedback}_run{runid}_"
-                            print(dirpath + filename)
+
                             if os.path.exists(
                                 dirpath + filename + "human_likeness.npy"
                             ):
+                                print(dirpath + filename)
                                 hl.append(
                                     np.load(dirpath + filename + "human_likeness.npy")
                                 )
@@ -136,4 +130,5 @@ if __name__ == "__main__":
                             supreg,
                             hum_feedback,
                             algo,
+                            env,
                         )
