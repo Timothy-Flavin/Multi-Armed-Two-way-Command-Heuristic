@@ -959,6 +959,10 @@ if __name__ == "__main__":
             gae_lambda=0.95,
         )
 
+        model.load(
+            "./PaperExperiment/TTT/algo_PPO/model_checkpoints/r_0.95_supregFalse"
+        )
+        model.eval_mode = True
         online = True
     if args.record:
         # human_buff(env, h_mem, n_agents=n_agents)
