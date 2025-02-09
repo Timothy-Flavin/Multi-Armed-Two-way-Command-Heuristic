@@ -1,5 +1,6 @@
 import numpy as np
 from abc import ABC, abstractmethod
+from scipy.stats import invgamma, norm
 
 
 class MAB_Sampler(ABC):
@@ -103,7 +104,7 @@ class Thompson_Dirichlet_Sleepy(MAB_Sampler):
         return retstr
 
 
-class Thompson_Beta_Sleepy(MAB_Sampler):
+class Thompson_Beta_CombiSemi(MAB_Sampler):
     def __init__(
         self,
         n_agents,
@@ -112,9 +113,7 @@ class Thompson_Beta_Sleepy(MAB_Sampler):
         experience_strength=1,
         id=0,
         single=True,
-        speaker=True,
     ):
-        self.speaker = speaker
         self.id = id
         self.single = single
         self.n_agents = n_agents
@@ -124,7 +123,7 @@ class Thompson_Beta_Sleepy(MAB_Sampler):
         self.avg_num_arms_pulled = n_agents / 2  # Running estimate
         self.arm_pul_probs = np.ones(self.n_agents)
 
-    def select_teammates(self, available_teammates):
+    def choose(self, available_teammates):
         """Samples success probabilities and selects teammates to suggest to."""
         sampled_probs = np.random.beta(self.alpha, self.beta)
         print("before avail: ", sampled_probs)
@@ -150,28 +149,62 @@ class Thompson_Beta_Sleepy(MAB_Sampler):
                 1 - self.decay_factor
             ) * arms_pulled
 
-            if self.speaker:
-                # Update the Beta distribution parameters
-                # TODO normalize by probability of arm being pulled
-                self.alpha += (
-                    arms_pulled * advantage * n_options
-                )  # Do we need self arm pull prob
-                self.beta += arms_pulled * (1 - advantage)
-                self.alpha[self.id] += (arms_pulled * advantage) / arms_pulled.sum()
-                self.beta[self.id] += (
-                    arms_pulled * (1 - advantage)
-                ) / arms_pulled.sum()
+            # Update the Beta distribution parameters
+            # TODO normalize by probability of arm being pulled
+            self.alpha += (
+                arms_pulled * advantage * n_options
+            )  # Do we need self arm pull prob
+            self.beta += arms_pulled * (1 - advantage)
+            self.alpha[self.id] += (arms_pulled * advantage) / arms_pulled.sum()
+            self.beta[self.id] += (arms_pulled * (1 - advantage)) / arms_pulled.sum()
 
-            if not self.speaker:
-                # Update the Beta distribution parameters
-                alpha_advantage = (
-                    arms_pulled * advantage * (advantage > 0).astype(float)
-                )
-                beta_advantage = (
-                    arms_pulled * (-advantage) * (advantage < 0).astype(float)
-                )
-                self.alpha += alpha_advantage / self.arm_pul_probs
-                self.beta += beta_advantage / self.arm_pul_probs
+
+class Thompson_Gaussian_Sleepy(MAB_Sampler):
+    def __init__(
+        self,
+        n_agents,
+        prior_strength=1,
+        experience_strength=1,
+        id=0,
+        mu_0=0,
+        n_0=1,
+        alpha_0=1,
+        beta_0=1,
+        lambda_=0.99,
+        gamma=0.99,
+    ):
+        self.id = id
+        self.num_arms = n_agents
+        self.lambda_ = lambda_
+        self.gamma = gamma
+        self.mu = np.zeros(self.num_arms) + mu_0
+        self.sigmas = np.ones(self.num_arms)
+        self.ns = np.zeros(self.num_arms) + n_0
+        self.betas = np.zeros(self.num_arms) + beta_0
+        self.alphas = np.zeros(self.num_arms) + alpha_0
+
+    def choose(self, available_teammates, n_options):
+        sampled_means = np.zeros(self.num_arms)
+        for a in range(self.num_arms):
+            sigma_sq = invgamma.rvs(self.alpha[a], scale=self.beta[a])
+            sampled_means[a] = norm.rvs(self.mu[a], np.sqrt(sigma_sq / self.n[a]))
+        return np.argmax(sampled_means)
+
+    def update(self, arms_pulled, advantage, n_options):
+        # Apply time decay to previously active arms
+        # for a in range(self.num_arms):
+        #    if a != arm:
+        #        self.beta[a] *= self.gamma  # Increase uncertainty for inactive arms
+        self.betas /= self.gamma  # Increase uncertainty for inactive arms
+
+        # Update parameters for active arm
+        prev_mu = self.mu[arms_pulled]
+        self.mu[arms_pulled] = (1 - self.lambda_) * prev_mu + self.lambda_ * advantage
+        self.alphas[arms_pulled] += 0.5
+        self.betas[arms_pulled] = (1 - self.lambda_) * self.beta[
+            arms_pulled
+        ] + 0.5 * self.lambda_ * (advantage - prev_mu) ** 2
+        self.n[arms_pulled] += 1  # Increment only for pulled arm
 
 
 # # Example usage
@@ -304,7 +337,7 @@ def check_baseline(n_agents, trials=1000):
 class MATCH:
     def __init__(self, n_agents, id=0, stype="Thompson", single=True):
         if stype == "Thompson":
-            self.listener = Thompson_Beta_Sleepy(
+            self.listener = Thompson_Beta_CombiSemi(
                 n_agents=n_agents,
                 decay_factor=0.95,
                 prior_strength=1,
@@ -314,7 +347,7 @@ class MATCH:
                 single=single,
                 n_explore=2,
             )
-            self.speaker = Thompson_Beta_Sleepy(
+            self.speaker = Thompson_Beta_CombiSemi(
                 n_agents=n_agents,
                 decay_factor=0.95,
                 prior_strength=1,
