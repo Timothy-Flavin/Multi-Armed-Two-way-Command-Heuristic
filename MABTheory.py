@@ -1,6 +1,7 @@
 import numpy as np
 from abc import ABC, abstractmethod
 from scipy.stats import invgamma, norm
+import matplotlib.pyplot as plt
 
 
 class MAB_Sampler(ABC):
@@ -125,21 +126,28 @@ class Thompson_Beta_CombiSemi(MAB_Sampler):
 
     def choose(self, available_teammates):
         """Samples success probabilities and selects teammates to suggest to."""
+        # Needs to be bool TODO
+        available_teammates = available_teammates
         sampled_probs = np.random.beta(self.alpha, self.beta)
-        print("before avail: ", sampled_probs)
+        # print("before avail: ", sampled_probs)
         sampled_probs[1 - available_teammates] = 0
-        print("after avail: ", sampled_probs)
+        # print("after avail: ", sampled_probs)
+        # print("alpha beta: ", self.alpha, self.beta)
         if self.single:
             return (sampled_probs == np.argmax(sampled_probs)).astype(int)
         else:
             selected = (sampled_probs > 0.5).astype(int)
-            if selected(self.id) == 1:
+            if selected[self.id] == 1:
                 selected = selected * 0
                 selected[self.id] = 1
             return selected
 
     def update(self, arms_pulled, advantage, n_options):
         """Updates Beta distributions based on responses and normalizes no-suggestion arm."""
+        # print("arms pulled: ", arms_pulled)
+        if arms_pulled.sum() == 0:
+            self.alpha[self.id] *= self.decay_factor
+            return 0
         self.alpha *= self.decay_factor
         self.beta *= self.decay_factor
 
@@ -149,14 +157,20 @@ class Thompson_Beta_CombiSemi(MAB_Sampler):
                 1 - self.decay_factor
             ) * arms_pulled
 
+            # print(advantage * arms_pulled)
             # Update the Beta distribution parameters
             # TODO normalize by probability of arm being pulled
             self.alpha += (
                 arms_pulled * advantage * n_options
             )  # Do we need self arm pull prob
             self.beta += arms_pulled * (1 - advantage)
-            self.alpha[self.id] += (arms_pulled * advantage) / arms_pulled.sum()
-            self.beta[self.id] += (arms_pulled * (1 - advantage)) / arms_pulled.sum()
+            self.alpha[self.id] += advantage.sum() / arms_pulled.sum()
+            self.beta[self.id] += (
+                (1 - advantage) * arms_pulled
+            ).sum() / arms_pulled.sum()
+
+    def dist_mode(self, prior=None):
+        return self.alpha / (self.alpha + self.beta)
 
 
 class Thompson_Gaussian_Sleepy(MAB_Sampler):
@@ -168,26 +182,46 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
         id=0,
         mu_0=0,
         n_0=1,
-        alpha_0=1,
-        beta_0=1,
+        alpha_0=1.5,
+        beta_0=1.5,
         lambda_=0.99,
         gamma=0.99,
+        bg_learning_rate=0.95,
+        prob_weight_arms=True,
     ):
         self.id = id
         self.num_arms = n_agents
         self.lambda_ = lambda_
         self.gamma = gamma
+        self.bg_learning_rate = bg_learning_rate
         self.mu = np.zeros(self.num_arms) + mu_0
         self.sigmas = np.ones(self.num_arms)
         self.ns = np.zeros(self.num_arms) + n_0
         self.betas = np.zeros(self.num_arms) + beta_0
         self.alphas = np.zeros(self.num_arms) + alpha_0
+        self.prob_weight_arms = prob_weight_arms
+
+        self.arm_avail_probs = np.ones(self.num_arms)
 
     def choose(self, available_teammates, n_options):
+        """Samples means and selects teammates to suggest to."""
+        available_teammates = available_teammates.astype(int)
+        if self.prob_weight_arms:
+            self.arm_avail_probs = (self.bg_learning_rate * self.arm_avail_probs) + (
+                1 - self.bg_learning_rate
+            ) * available_teammates
+        # print(self.arm_avail_probs, " avail")
+        # input()
         sampled_means = np.zeros(self.num_arms)
         for a in range(self.num_arms):
-            sigma_sq = invgamma.rvs(self.alpha[a], scale=self.beta[a])
-            sampled_means[a] = norm.rvs(self.mu[a], np.sqrt(sigma_sq / self.n[a]))
+            sigma_sq = invgamma.rvs(a=self.alphas[a], scale=self.betas[a])
+
+            # print(f"alpha: {self.alphas[a]}, beta: {self.betas[a]}")
+            # x = np.arange(0, 5, 0.001)
+            # R = invgamma.pdf(x, a=self.alphas[a], scale=self.betas[a] + 1)
+            sampled_means[a] = norm.rvs(self.mu[a], np.sqrt(sigma_sq / self.ns[a]))
+        # print(sampled_means)
+        # input()
         return np.argmax(sampled_means)
 
     def update(self, arms_pulled, advantage, n_options):
@@ -195,16 +229,36 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
         # for a in range(self.num_arms):
         #    if a != arm:
         #        self.beta[a] *= self.gamma  # Increase uncertainty for inactive arms
+        # print(self.betas, " before")
+
+        # print("alphas betas ", self.alphas, self.betas)
+        # print("normal means before", self.mu)
+        # print("normal sigmas before", invgamma.mean(self.alphas, self.betas))
+        # print()
+        arms_pulled = np.array(arms_pulled).astype(bool)
         self.betas /= self.gamma  # Increase uncertainty for inactive arms
+        # print("what is this nonsense")
+        # print(self.lambda_ / self.arm_avail_probs)
 
         # Update parameters for active arm
+        muscale = min((1 - self.lambda_) / self.arm_avail_probs[arms_pulled], 0.5)
+        # print(arms_pulled)
+        # print(muscale)
+        # print(muscale[arms_pulled])
+        # print(advantage)
+
         prev_mu = self.mu[arms_pulled]
-        self.mu[arms_pulled] = (1 - self.lambda_) * prev_mu + self.lambda_ * advantage
-        self.alphas[arms_pulled] += 0.5
-        self.betas[arms_pulled] = (1 - self.lambda_) * self.beta[
+        self.mu[arms_pulled] = (1 - muscale) * prev_mu + muscale * advantage
+        self.alphas[arms_pulled] += 0.5 / self.arm_avail_probs[arms_pulled]
+        self.betas[arms_pulled] = (1 - muscale) * self.betas[
             arms_pulled
-        ] + 0.5 * self.lambda_ * (advantage - prev_mu) ** 2
-        self.n[arms_pulled] += 1  # Increment only for pulled arm
+        ] + 0.5 * muscale * (advantage - prev_mu) ** 2
+        self.ns[arms_pulled] += 1  # Increment only for pulled arm
+        # print("alphas betas after: ", self.alphas, self.betas)
+        # input()
+
+    def dist_mode(self, prior=None):
+        print(self.mu)
 
 
 # # Example usage
@@ -422,10 +476,98 @@ def symmetric_advantage(n_agents):
     return adv
 
 
+def test_thompsons(n_agents, n_steps, n_trials):
+
+    reward_loc = np.random.rand(n_agents) * 5 - 2
+    reward_scale = np.random.rand(n_agents) + 1
+    listen_prob = np.random.rand(n_agents)
+    appear_prob = np.random.rand(n_agents)
+
+    speaker_single = Thompson_Beta_CombiSemi(
+        n_agents, id=0, single=True, decay_factor=1.0
+    )
+    speaker_multi = Thompson_Beta_CombiSemi(
+        n_agents, id=0, single=False, decay_factor=1.0
+    )
+    listener = Thompson_Gaussian_Sleepy(n_agents, id=0, lambda_=0.99, gamma=0.99)
+
+    print(
+        "reward_loc: ",
+        reward_loc,
+        "reward_scale: ",
+        reward_scale,
+        "listen_prob: ",
+        listen_prob,
+        "appear_prob: ",
+        appear_prob,
+        "\n",
+    )
+    speaker_single_arms_chosen = np.zeros((n_agents, n_steps, n_trials))
+    speaker_multi_arms_chosen = np.zeros((n_agents, n_steps, n_trials))
+    listener_arms_chosen = np.zeros((n_agents, n_steps, n_trials))
+    for i in range(n_steps):
+        for j in range(n_trials):
+            available_teammates = (np.random.rand(n_agents) < appear_prob).astype(float)
+            speaker_single_arms_chosen[:, i, j] = speaker_single.choose(
+                available_teammates
+            )
+            speaker_multi_arms_chosen[:, i, j] = speaker_multi.choose(
+                available_teammates
+            )
+            print(speaker_single_arms_chosen[:, i, j])
+            print(speaker_multi_arms_chosen[:, i, j])
+            input()
+            c = listener.choose(available_teammates, n_options=1)
+            listener_arms_chosen[c, i, j] = 1.0
+
+            reward = np.random.normal(
+                loc=reward_loc,
+                scale=reward_scale,
+            )
+
+            listener.update(listener_arms_chosen[:, i, j], reward[c], n_options=1)
+            speaker_single.update(
+                arms_pulled=speaker_single_arms_chosen[:, i, j],
+                advantage=(np.random.rand(n_agents) < listen_prob).astype(float),
+                n_options=1,
+            )
+            speaker_multi.update(
+                arms_pulled=speaker_multi_arms_chosen[:, i, j],
+                advantage=(np.random.rand(n_agents) < listen_prob).astype(float),
+                n_options=1,
+            )
+    l = []
+    for i in range(n_agents):
+        plt.plot(np.mean(speaker_single_arms_chosen[i, :, :], axis=-1))
+        l.append(f"Speaker Single {i}")
+    plt.title("Speaker Single")
+    plt.legend(l)
+    plt.show()
+
+    l = []
+    for i in range(n_agents):
+        plt.plot(np.mean(speaker_multi_arms_chosen[i, :, :], axis=-1))
+        l.append(f"Speaker Multi {i}")
+    plt.legend(l)
+    plt.title("Speaker Multi")
+    plt.show()
+
+    l = []
+    for i in range(n_agents):
+        plt.plot(np.mean(listener_arms_chosen[i, :, :], axis=-1))
+        l.append(f"Listener {i}")
+    plt.legend(l)
+    plt.plot(np.mean(listener_arms_chosen, axis=-1))
+    plt.title("Listener")
+    plt.show()
+
+
 if __name__ == "__main__":
     # check_baseline(5)
     n_agents = 5
 
+    test_thompsons(n_agents, 500, 100)
+    exit()
     matches = [MATCH(n_agents, i) for i in range(n_agents)]
     # gmatches = [GMATCH(n_agents, i) for i in range(n_agents)]
     # imatches = [IMATCH(n_agents, i) for i in range(n_agents)]
