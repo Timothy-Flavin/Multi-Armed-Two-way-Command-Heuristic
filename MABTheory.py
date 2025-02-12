@@ -208,6 +208,7 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
         gamma=0.99,
         bg_learning_rate=0.95,
         prob_weight_arms=True,
+        min_arm_prob=0.1,
     ):
         self.id = id
         self.num_arms = n_agents
@@ -226,6 +227,8 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
         self.beta_0 = beta_0
 
         self.arm_avail_probs = np.ones(self.num_arms)
+        self.sqrt_Gamma = np.sqrt(self.gamma)
+        self.min_arm_prob = min_arm_prob
 
     def choose(self, available_teammates, priors=None):
         """Samples means and selects teammates to suggest to."""
@@ -235,6 +238,7 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
             self.arm_avail_probs = (self.bg_learning_rate * self.arm_avail_probs) + (
                 1 - self.bg_learning_rate
             ) * available_teammates
+            self.arm_avail_probs = np.maximum(self.arm_avail_probs, self.min_arm_prob)
         # print(self.arm_avail_probs, " avail")
         # input()
         sampled_means = np.zeros(self.num_arms)
@@ -277,8 +281,8 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
             if arms_pulled[i] < 0.99:
                 self.betas[i] /= self.gamma
 
-        self.alphas = np.max(self.alphas, self.alpha_0)
-        self.betas = np.max(self.betas, self.beta_0)
+        self.alphas = np.maximum(self.alphas, self.alpha_0)
+        self.betas = np.maximum(self.betas, self.beta_0)
         # self.betas /= self.gamma  # Increase uncertainty for inactive arms
         # print("what is this nonsense")
         # print(self.lambda_ / self.arm_avail_probs)
@@ -553,7 +557,7 @@ def test_thompsons(n_agents, n_steps, n_trials):
     reward_loc = np.random.rand(n_agents) * 5 - 2
     reward_scale = np.random.rand(n_agents) + 0.1
     listen_prob = np.random.rand(n_agents)
-    appear_prob = np.random.rand(n_agents)
+    appear_prob = np.maximum(np.random.rand(n_agents), 0.1)
 
     print(
         "reward_loc: ",
@@ -570,9 +574,11 @@ def test_thompsons(n_agents, n_steps, n_trials):
     speaker_multi_arms_chosen = np.zeros((n_agents, n_steps, n_trials))
     listener_arms_chosen = np.zeros((n_agents, n_steps, n_trials))
     listener_arms_appeared = np.zeros((n_agents, n_steps, n_trials))
+    expected_rewards = np.zeros((n_agents, n_steps, n_trials))
 
     lowest_arm = np.argmin(reward_loc)
     lowest_val = np.min(reward_loc)
+    diff = np.max(reward_loc) - lowest_val
     for j in range(n_trials):
         reward_loc[lowest_arm] = lowest_val
         speaker_single = Thompson_Beta_CombiSemi(
@@ -581,12 +587,13 @@ def test_thompsons(n_agents, n_steps, n_trials):
         speaker_multi = Thompson_Beta_CombiSemi(
             n_agents, id=0, single=False, decay_factor=0.99
         )
-        listener = Thompson_Gaussian_Sleepy(n_agents, id=0, lambda_=0.99, gamma=0.95)
+        listener = Thompson_Gaussian_Sleepy(n_agents, id=0, lambda_=0.95, gamma=0.95)
         for i in range(n_steps):
-            reward_loc[lowest_arm] = lowest_val + max(i * 2 / n_steps, 1) * 3
+            reward_loc[lowest_arm] = lowest_val + min(i * 2 / n_steps, 1.2) * diff
             available_teammates = np.random.rand(n_agents) < appear_prob
             listener_arms_appeared[:, i, j] = available_teammates
             listener_arms_appeared[0, i, j] = 1  # ID 0 is always available
+            expected_rewards[:, i, j] = np.copy(listener.mu)
 
             speaker_single_arms_chosen[:, i, j] = speaker_single.choose(
                 np.ones(n_agents)
@@ -595,7 +602,7 @@ def test_thompsons(n_agents, n_steps, n_trials):
             # print(f"singls arms chosen: {speaker_single_arms_chosen[:, i, j]}")
             # print(f"multi arms chosen: {speaker_multi_arms_chosen[:, i, j]}")
             # input()
-            c = listener.choose(available_teammates, n_options=1)
+            c = listener.choose(available_teammates, priors=None)
 
             listener_arms_chosen[c, i, j] = 1.0
 
@@ -605,7 +612,9 @@ def test_thompsons(n_agents, n_steps, n_trials):
             )
             followed = (np.random.rand(n_agents) < listen_prob).astype(float)
             # print(f"reward: {reward}, followed: {followed}")
-            listener.update(listener_arms_chosen[:, i, j], reward[c], n_options=1)
+            listener.update(
+                arms_pulled=listener_arms_chosen[:, i, j], advantage=reward[c]
+            )
             speaker_single.update(
                 arms_pulled=speaker_single_arms_chosen[:, i, j],
                 advantage=followed,
@@ -617,6 +626,11 @@ def test_thompsons(n_agents, n_steps, n_trials):
                 n_options=1,
             )
             # print()
+        if j % 10 == 0:
+            print(
+                f"{j}: listener stdev: {invgamma.mean(a=listener.alphas, scale=listener.betas)} a: {listener.alphas}, b: {listener.betas}"
+            )
+
     l = []
     for i in range(n_agents):
         plt.plot(np.mean(speaker_single_arms_chosen[i, :, :], axis=-1))
@@ -646,6 +660,14 @@ def test_thompsons(n_agents, n_steps, n_trials):
     plt.legend(l)
     plt.plot(np.mean(listener_arms_chosen, axis=-1))
     plt.title("Listener")
+    plt.show()
+
+    l = []
+    for i in range(n_agents):
+        plt.plot(np.mean(expected_rewards[i, :, :], axis=-1))
+        l.append(f"Listener arm {i}")
+    plt.legend(l)
+    plt.title("Listener expected rewards")
     plt.show()
 
 
