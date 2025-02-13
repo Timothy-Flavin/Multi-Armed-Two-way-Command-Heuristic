@@ -1,5 +1,7 @@
 import numpy as np
 from abc import ABC, abstractmethod
+from scipy.stats import invgamma, norm
+import matplotlib.pyplot as plt
 
 
 class MAB_Sampler(ABC):
@@ -103,7 +105,7 @@ class Thompson_Dirichlet_Sleepy(MAB_Sampler):
         return retstr
 
 
-class Thompson_Beta_Sleepy(MAB_Sampler):
+class Thompson_Beta_CombiSemi(MAB_Sampler):
     def __init__(
         self,
         n_agents,
@@ -112,10 +114,10 @@ class Thompson_Beta_Sleepy(MAB_Sampler):
         experience_strength=1,
         id=0,
         single=True,
-        speaker=True,
     ):
-        self.speaker = speaker
         self.id = id
+        self.exp_strength = experience_strength
+        self.prior_strength = prior_strength
         self.single = single
         self.n_agents = n_agents
         self.decay_factor = decay_factor
@@ -127,47 +129,46 @@ class Thompson_Beta_Sleepy(MAB_Sampler):
 
         self.active_probs = np.ones(self.n_agents) / 2
 
-    def choose(self, active):
+    def choose(self, available_teammates, prior=None):
         """Samples success probabilities and selects teammates to suggest to."""
-        print(active)
-        self.active_probs = (
-            self.decay_factor * self.active_probs + (1 - self.decay_factor) * active
-        )
-        need_to_explore = active * self.arm_pul_count
-        if np.sum(need_to_explore) > 0:
-            candidates = np.random.rand(self.n_agents) * (need_to_explore > 0).astype(
-                float
-            )
-            if self.single:
-                selected = (candidates == np.argmax(candidates)).astype(int)
-                self.arm_pul_count += selected
-                return
-            else:
-                selected = (candidates > 0.5).astype(int)
-                if selected(self.id) == 1:
-                    selected = selected * 0
-                    selected[self.id] = 1
-                self.arm_pul_count += selected
-                return selected
-
+        # Needs to be bool TODO
+        available_teammates = np.array(available_teammates, dtype=bool)
         sampled_probs = np.random.beta(self.alpha, self.beta)
-        print("before avail: ", sampled_probs)
-        sampled_probs *= active
-        print("after avail: ", sampled_probs)
+        # print("before avail: ", sampled_probs)
+        # print(available_teammates)
+        sampled_probs[np.logical_not(available_teammates)] = 0
+
+        if prior is not None:
+            sampled_probs = (
+                self.exp_strength * sampled_probs + prior * self.prior_strength
+            )
+            sampled_probs = sampled_probs / (self.exp_strength + self.prior_strength)
+        # print("after avail: ", sampled_probs)
+        # input()
+        # print("alpha beta: ", self.alpha, self.beta)
         if self.single:
-            return (sampled_probs == np.max(sampled_probs)).astype(int)
+            # print(f"sampled probs: {sampled_probs}")
+            ss = sampled_probs == np.max(sampled_probs)
+            # print(ss.astype(int))
+            return ss.astype(int)
         else:
             selected = (sampled_probs > 0.5).astype(int)
-            if selected(self.id) == 1:
+            if selected[self.id] == 1:
                 selected = selected * 0
                 selected[self.id] = 1
             return selected
 
     def update(self, arms_pulled, advantage, n_options, debug=False):
         """Updates Beta distributions based on responses and normalizes no-suggestion arm."""
+        # print("arms pulled: ", arms_pulled)
         self.alpha *= self.decay_factor
         self.beta *= self.decay_factor
+        # print(f"alpha: {self.alpha}, beta: {self.beta}: single: {self.single}")
 
+        if arms_pulled.sum() == 0:
+            return 0
+
+        # print(f"arms pulled: {arms_pulled}, n options: {n_options}")
         # Track how many arms are usually pulled when we choose to talk
         if arms_pulled[self.id] == 0:  # If not the "no suggestion" arm
             # self.arm_pul_probs = (self.decay_factor * self.arm_pul_probs) + (
@@ -176,44 +177,148 @@ class Thompson_Beta_Sleepy(MAB_Sampler):
             if debug:
                 print(f"Debugging Thomp B Sleepy Update: arms pulled: {arms_pulled}")
 
-            if self.speaker:
-                # Update the Beta distribution parameters
-                # TODO normalize by probability of arm being pulled
-                self.alpha = self.alpha + (
-                    arms_pulled * advantage * n_options  # n choices the other guy had
-                )  # Do we need self arm pull prob
-                self.beta = self.beta + (arms_pulled * (1 - advantage))
-                self.alpha[self.id] = (
-                    self.alpha[self.id]
-                    + (arms_pulled * advantage).sum() / arms_pulled.sum()
-                )
-                self.beta[self.id] += (
-                    arms_pulled * (1 - advantage)
-                ).sum() / arms_pulled.sum()
+            # print(advantage * arms_pulled)
+            # Update the Beta distribution parameters
+            # TODO normalize by probability of arm being pulled
+            self.alpha += (
+                arms_pulled * advantage * n_options
+            ) * self.exp_strength  # Do we need self arm pull prob
+            self.beta += arms_pulled * (1 - advantage)
+            self.beta[self.id] += (
+                (advantage * arms_pulled).sum() / arms_pulled.sum() * self.exp_strength
+            )
+            self.alpha[self.id] += (
+                ((1 - advantage) * arms_pulled).sum()
+                / arms_pulled.sum()
+                * self.exp_strength
+            )
+        # print(f"alpha: {self.alpha}, beta: {self.beta} After")
 
-            if not self.speaker:
-                # Update the Beta distribution parameters
-                alpha_advantage = (
-                    arms_pulled * advantage * (advantage > 0).astype(float)
-                )
-                beta_advantage = (
-                    arms_pulled * (-advantage) * (advantage < 0).astype(float)
-                )
-                self.alpha += (
-                    alpha_advantage / self.active_probs
-                )  # need to give more weight to the ones that are pulled rarely
-                self.beta += beta_advantage / self.active_probs
-
-    def dist_mode(self):
+    def dist_mode(self, prior=None):
         return self.alpha / (self.alpha + self.beta)
 
-    def __str__(self):
-        restr = f"Thompson Beta Sampler: \n"
-        restr += f"  alpha: {self.alpha}, beta: {self.beta}\n"
-        restr += f"  avg num arms pulled: {self.avg_num_arms_pulled}\n"
-        restr += f"  arm pull probs: {self.arm_pul_probs}\n"
-        restr += f"  arm pull count: {self.arm_pul_count}\n"
-        return restr
+
+class Thompson_Gaussian_Sleepy(MAB_Sampler):
+    def __init__(
+        self,
+        n_agents,
+        prior_strength=1,
+        experience_strength=1,
+        id=0,
+        mu_0=0,
+        n_0=1,
+        alpha_0=1.5,
+        beta_0=2.5,
+        lambda_=0.99,
+        gamma=0.99,
+        bg_learning_rate=0.95,
+        prob_weight_arms=True,
+        min_arm_prob=0.1,
+    ):
+        self.id = id
+        self.num_arms = n_agents
+        self.lambda_ = lambda_
+        self.gamma = gamma
+        self.bg_learning_rate = bg_learning_rate
+        self.mu = np.zeros(self.num_arms) + mu_0
+        self.ns = np.zeros(self.num_arms) + n_0
+        self.betas = np.zeros(self.num_arms) + beta_0
+        self.alphas = np.zeros(self.num_arms) + alpha_0
+        self.prob_weight_arms = prob_weight_arms
+
+        self.prior_strength = prior_strength
+        self.experience_strength = experience_strength
+        self.alpha_0 = alpha_0
+        self.beta_0 = beta_0
+
+        self.arm_avail_probs = np.ones(self.num_arms)
+        self.sqrt_Gamma = np.sqrt(self.gamma)
+        self.min_arm_prob = min_arm_prob
+
+    def choose(self, available_teammates, priors=None):
+        """Samples means and selects teammates to suggest to."""
+        available_teammates = available_teammates.copy().astype(int)
+        available_teammates[self.id] = 1
+        if self.prob_weight_arms:
+            self.arm_avail_probs = (self.bg_learning_rate * self.arm_avail_probs) + (
+                1 - self.bg_learning_rate
+            ) * available_teammates
+            self.arm_avail_probs = np.maximum(self.arm_avail_probs, self.min_arm_prob)
+        # print(self.arm_avail_probs, " avail")
+        # input()
+        sampled_means = np.zeros(self.num_arms)
+        for a in range(self.num_arms):
+            sigma_sq = invgamma.rvs(a=self.alphas[a], scale=self.betas[a])
+
+            # print(f"alpha: {self.alphas[a]}, beta: {self.betas[a]}")
+            # x = np.arange(0, 5, 0.001)
+            # R = invgamma.pdf(x, a=self.alphas[a], scale=self.betas[a] + 1)
+            sampled_means[a] = norm.rvs(loc=self.mu[a], scale=sigma_sq)
+        # print(sampled_means)
+        # print(available_teammates)
+        scores = sampled_means - (1 - available_teammates) * 1e10
+
+        if priors is not None:
+            scores = self.experience_strength * scores + self.prior_strength * priors
+        # print(scores)
+        arm = np.argmax(scores)
+        # print(arm)
+        # print(self.arm_avail_probs)
+        # input()
+        return arm
+
+    def update(self, arms_pulled, advantage):
+        # Apply time decay to previously active arms
+        # for a in range(self.num_arms):
+        #    if a != arm:
+        #        self.beta[a] *= self.gamma  # Increase uncertainty for inactive arms
+        # print(self.betas, " before")
+
+        # print("alphas betas ", self.alphas, self.betas)
+        # print("normal means before", self.mu)
+        # print("normal sigmas before", invgamma.mean(a=self.alphas, scale=self.betas))
+        # input()
+        self.alphas *= self.gamma  # TODO cant shrink past 1, also this feels wrong
+        self.betas *= self.gamma
+
+        arms_pulled = np.array(arms_pulled).astype(bool)
+        for i in range(self.num_arms):
+            if arms_pulled[i] < 0.99:
+                self.betas[i] /= self.gamma
+
+        self.alphas = np.maximum(self.alphas, self.alpha_0)
+        self.betas = np.maximum(self.betas, self.beta_0)
+        # self.betas /= self.gamma  # Increase uncertainty for inactive arms
+        # print("what is this nonsense")
+        # print(self.lambda_ / self.arm_avail_probs)
+
+        # Update parameters for active arm
+        muscale = min(
+            (1 - self.lambda_) / self.arm_avail_probs[arms_pulled],
+            (1 - self.lambda_) * 10,
+        )
+        # print(arms_pulled)
+        # print(muscale)
+        # print(muscale[arms_pulled])
+        # print(advantage)
+
+        prev_mu = self.mu[arms_pulled]
+        self.mu[arms_pulled] = (1 - muscale) * prev_mu + muscale * advantage
+        self.alphas[arms_pulled] += 0.5 / self.arm_avail_probs[arms_pulled]
+        if True:
+            self.betas[arms_pulled] += (
+                0.5 * (advantage - prev_mu) ** 2 / self.arm_avail_probs[arms_pulled]
+            )
+        else:
+            self.betas[arms_pulled] = (1 - muscale) * self.betas[
+                arms_pulled
+            ] + 0.5 * muscale * (advantage - prev_mu) ** 2
+        self.ns[arms_pulled] += 1  # Increment only for pulled arm
+        # print("alphas betas after: ", self.alphas, self.betas)
+        # input()
+
+    def dist_mode(self, prior=None):
+        print(self.mu)
 
 
 # # Example usage
@@ -343,56 +448,77 @@ def check_baseline(n_agents, trials=1000):
 
 
 class MATCH:
-    def __init__(self, n_agents, id=0, stype="Thompson", single=True):
+    def __init__(
+        self,
+        n_agents,
+        id=0,
+        stype="Thompson",
+        single=True,
+        lambda_=0.99,
+        gamma=0.95,
+        arm_lr=0.95,
+        listen_to_duplicate=True,
+    ):
         if stype == "Thompson":
-            self.listener = Thompson_Beta_Sleepy(
+            self.listener = Thompson_Gaussian_Sleepy(
                 n_agents=n_agents,
-                decay_factor=0.95,
+                gamma=gamma,
+                lambda_=lambda_,
                 prior_strength=1,
                 experience_strength=1,
-                speaker=False,
                 id=id,
-                single=True,
-                n_explore=2,
+                bg_learning_rate=arm_lr,
             )
-            self.speaker = Thompson_Beta_Sleepy(
+            self.speaker = Thompson_Beta_CombiSemi(
                 n_agents=n_agents,
-                decay_factor=0.95,
+                decay_factor=gamma,
                 prior_strength=1,
                 experience_strength=1,
-                speaker=True,
                 id=id,
                 single=single,
                 n_explore=2,
             )
-        elif stype == "UCB":
-            self.listener = UCB_Multinomial(n=n_agents, explore_n=2)
-            self.speaker = UCB_Multinomial(n=n_agents, explore_n=2)
-
+        else:
+            print("not implemented")
         self.type = stype
         self.id = id
         self.priors = np.zeros(n_agents) + 2
         self.n_agents = n_agents
+        self.commanded_by = np.zeros(n_agents)
+        self.commanded_by[self.id] = 1
+        self.listen_to_duplicate = listen_to_duplicate
 
-    def policy_with_oracle(self, active, actions):
-        commander_choices = np.copy(active)
-        self.avail_commands = np.copy(active)
-        commander_choices[self.id] = 1
-        leader = self.listener.choose(0.5, active=commander_choices)
-        self.leader = leader
-        chosen_action = actions[leader]
+        # These two vars are memorized during action selection
+        # so that they can be used during update.
+        self.told_to = np.zeros(n_agents)
+        self.n_options = 1
+
+    def policy_with_oracle(self, commanded_by, told_to, priors=None):
+        self.told_to = np.copy(told_to)
+        self.commanded_by = np.copy(commanded_by)
+        self.n_options = np.sum(commanded_by)
+        self.commanded_by[self.id] = 1
+        leader = self.listener.choose(
+            available_teammates=self.commanded_by, priors=priors
+        )
+
+        self.leaders = np.zeros(self.n_agents)
+        self.leaders[leader] = 1
+        if self.listen_to_duplicate:
+            self.leaders[told_to == told_to[leader]] = 1
+            # TODO for continuous actions, add an epsilon for similar actions
+        chosen_action = told_to[leader]
         return chosen_action, leader
 
     def update_listener(self, adv, verbose=0):  # adv is one number
-        if self.avail_commands[self.leader] > 0:
-            self.listener.update(adv, self.leader, verbose)
+        self.listener.update(arms_pulled=self.leaders, advantage=adv)
 
-    def choose_target(self, priors, active):
+    def choose_target(self, available_teammates, priors=None):
         if priors is None:
             priors = self.priors
-        self.target = self.speaker.choose(priors, active)
-        targets = np.zeros(self.n_agents)
-        targets[self.target] = 1
+        self.targets = self.speaker.choose(
+            available_teammates=available_teammates, priors=priors
+        )
         return targets
 
     def update_speaker(
@@ -430,7 +556,135 @@ def symmetric_advantage(n_agents):
     return adv
 
 
-def test_match(n_agents):
+def test_thompsons(n_agents, n_steps, n_trials):
+
+    reward_loc = np.random.rand(n_agents) * 5 - 2
+    reward_scale = np.random.rand(n_agents) + 0.1
+    listen_prob = np.random.rand(n_agents)
+    appear_prob = np.maximum(np.random.rand(n_agents), 0.1)
+
+    print(
+        "reward_loc: ",
+        reward_loc,
+        "\nreward_scale: ",
+        reward_scale,
+        "\nlisten_prob: ",
+        listen_prob,
+        "\nappear_prob: ",
+        appear_prob,
+        "\n",
+    )
+    speaker_single_arms_chosen = np.zeros((n_agents, n_steps, n_trials))
+    speaker_multi_arms_chosen = np.zeros((n_agents, n_steps, n_trials))
+    listener_arms_chosen = np.zeros((n_agents, n_steps, n_trials))
+    listener_arms_appeared = np.zeros((n_agents, n_steps, n_trials))
+    expected_rewards = np.zeros((n_agents, n_steps, n_trials))
+
+    lowest_arm = np.argmin(reward_loc)
+    lowest_val = np.min(reward_loc)
+    diff = np.max(reward_loc) - lowest_val
+    for j in range(n_trials):
+        reward_loc[lowest_arm] = lowest_val
+        speaker_single = Thompson_Beta_CombiSemi(
+            n_agents, id=0, single=True, decay_factor=0.99
+        )
+        speaker_multi = Thompson_Beta_CombiSemi(
+            n_agents, id=0, single=False, decay_factor=0.99
+        )
+        listener = Thompson_Gaussian_Sleepy(n_agents, id=0, lambda_=0.95, gamma=0.95)
+        for i in range(n_steps):
+            reward_loc[lowest_arm] = lowest_val + min(i * 2 / n_steps, 1.2) * diff
+            available_teammates = np.random.rand(n_agents) < appear_prob
+            listener_arms_appeared[:, i, j] = available_teammates
+            listener_arms_appeared[0, i, j] = 1  # ID 0 is always available
+            expected_rewards[:, i, j] = np.copy(listener.mu)
+
+            speaker_single_arms_chosen[:, i, j] = speaker_single.choose(
+                np.ones(n_agents)
+            )
+            speaker_multi_arms_chosen[:, i, j] = speaker_multi.choose(np.ones(n_agents))
+            # print(f"singls arms chosen: {speaker_single_arms_chosen[:, i, j]}")
+            # print(f"multi arms chosen: {speaker_multi_arms_chosen[:, i, j]}")
+            # input()
+            c = listener.choose(available_teammates, priors=None)
+
+            listener_arms_chosen[c, i, j] = 1.0
+
+            reward = np.random.normal(
+                loc=reward_loc,
+                scale=reward_scale,
+            )
+            followed = (np.random.rand(n_agents) < listen_prob).astype(float)
+            # print(f"reward: {reward}, followed: {followed}")
+            listener.update(
+                arms_pulled=listener_arms_chosen[:, i, j], advantage=reward[c]
+            )
+            speaker_single.update(
+                arms_pulled=speaker_single_arms_chosen[:, i, j],
+                advantage=followed,
+                n_options=1,
+            )
+            speaker_multi.update(
+                arms_pulled=speaker_multi_arms_chosen[:, i, j],
+                advantage=followed,
+                n_options=1,
+            )
+            # print()
+        if j % 10 == 0:
+            print(
+                f"{j}: listener stdev: {invgamma.mean(a=listener.alphas, scale=listener.betas)} a: {listener.alphas}, b: {listener.betas}"
+            )
+
+    l = []
+    for i in range(n_agents):
+        plt.plot(np.mean(speaker_single_arms_chosen[i, :, :], axis=-1))
+        l.append(f"Speaker Single {i}")
+    plt.title("Speaker Single")
+    plt.legend(l)
+    plt.show()
+
+    l = []
+    for i in range(n_agents):
+        plt.plot(np.mean(speaker_multi_arms_chosen[i, :, :], axis=-1))
+        l.append(f"Speaker Multi {i}")
+    plt.legend(l)
+    plt.title("Speaker Multi")
+    plt.show()
+
+    l = []
+    chosenpercent = np.sum(listener_arms_chosen, axis=-1) / (
+        np.sum(listener_arms_appeared, axis=-1) + 0.0001
+    )
+    print(chosenpercent)
+    for i in range(n_agents):
+        plt.plot(
+            chosenpercent[i, :],
+        )
+        l.append(f"Listener {i}")
+    plt.legend(l)
+    plt.plot(np.mean(listener_arms_chosen, axis=-1))
+    plt.title("Listener")
+    plt.show()
+
+    l = []
+    for i in range(n_agents):
+        plt.plot(np.mean(expected_rewards[i, :, :], axis=-1))
+        l.append(f"Listener arm {i}")
+    plt.legend(l)
+    plt.title("Listener expected rewards")
+    plt.show()
+
+
+if __name__ == "__main__":
+    # check_baseline(5)
+    n_agents = 5
+
+    test_thompsons(n_agents, 500, 500)
+    exit()
+    matches = [MATCH(n_agents, i) for i in range(n_agents)]
+    # gmatches = [GMATCH(n_agents, i) for i in range(n_agents)]
+    # imatches = [IMATCH(n_agents, i) for i in range(n_agents)]
+
     adv = symmetric_advantage(n_agents)
     print("advantage: \n", adv)
     n_steps = 1000
