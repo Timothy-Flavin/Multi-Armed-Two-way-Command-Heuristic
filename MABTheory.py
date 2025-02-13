@@ -114,6 +114,7 @@ class Thompson_Beta_CombiSemi(MAB_Sampler):
         experience_strength=1,
         id=0,
         single=True,
+        n_explore=2,
     ):
         self.id = id
         self.exp_strength = experience_strength
@@ -127,11 +128,15 @@ class Thompson_Beta_CombiSemi(MAB_Sampler):
         self.arm_pul_probs = np.ones(self.n_agents)
         self.arm_pul_count = np.zeros(self.n_agents)
 
-        self.active_probs = np.ones(self.n_agents) / 2
+        self.active_probs = np.ones(self.n_agents) / self.n_agents
 
-    def choose(self, available_teammates, prior=None):
+    def choose(self, available_teammates: np.array, prior=None):
         """Samples success probabilities and selects teammates to suggest to."""
         # Needs to be bool TODO
+        self.active_probs = (
+            self.decay_factor * self.active_probs
+            + (1 - self.decay_factor) * available_teammates
+        )
         available_teammates = np.array(available_teammates, dtype=bool)
         sampled_probs = np.random.beta(self.alpha, self.beta)
         # print("before avail: ", sampled_probs)
@@ -158,7 +163,7 @@ class Thompson_Beta_CombiSemi(MAB_Sampler):
                 selected[self.id] = 1
             return selected
 
-    def update(self, arms_pulled, advantage, n_options, debug=False):
+    def update(self, arms_pulled, advantage, n_options=1, debug=False):
         """Updates Beta distributions based on responses and normalizes no-suggestion arm."""
         # print("arms pulled: ", arms_pulled)
         self.alpha *= self.decay_factor
@@ -180,12 +185,17 @@ class Thompson_Beta_CombiSemi(MAB_Sampler):
             # print(advantage * arms_pulled)
             # Update the Beta distribution parameters
             # TODO normalize by probability of arm being pulled
+            print(
+                f"updateing speaker {self.id} with arms pulled {arms_pulled}, adv: {advantage}, noptions: {n_options}"
+            )
             self.alpha += (
                 arms_pulled * advantage * n_options
             ) * self.exp_strength  # Do we need self arm pull prob
             self.beta += arms_pulled * (1 - advantage)
             self.beta[self.id] += (
-                (advantage * arms_pulled).sum() / arms_pulled.sum() * self.exp_strength
+                (advantage * arms_pulled * n_options).sum()
+                / arms_pulled.sum()
+                * self.exp_strength
             )
             self.alpha[self.id] += (
                 ((1 - advantage) * arms_pulled).sum()
@@ -196,6 +206,12 @@ class Thompson_Beta_CombiSemi(MAB_Sampler):
 
     def dist_mode(self, prior=None):
         return self.alpha / (self.alpha + self.beta)
+
+    def __str__(self):
+        mystr = f"Speaker Thompson Sampler id {self.id}: \n"
+        mystr += f"\n  alphas: {self.alpha}"
+        mystr += f"\n  betas: {self.beta}"
+        return mystr
 
 
 class Thompson_Gaussian_Sleepy(MAB_Sampler):
@@ -235,7 +251,7 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
         self.sqrt_Gamma = np.sqrt(self.gamma)
         self.min_arm_prob = min_arm_prob
 
-    def choose(self, available_teammates, priors=None):
+    def choose(self, available_teammates, prior=None):
         """Samples means and selects teammates to suggest to."""
         available_teammates = available_teammates.copy().astype(int)
         available_teammates[self.id] = 1
@@ -258,8 +274,8 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
         # print(available_teammates)
         scores = sampled_means - (1 - available_teammates) * 1e10
 
-        if priors is not None:
-            scores = self.experience_strength * scores + self.prior_strength * priors
+        if prior is not None:
+            scores = self.experience_strength * scores + self.prior_strength * prior
         # print(scores)
         arm = np.argmax(scores)
         # print(arm)
@@ -319,6 +335,13 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
 
     def dist_mode(self, prior=None):
         print(self.mu)
+
+    def __str__(self):
+        mystr = f"Listener Thompson Sampler id {self.id}: \n"
+        mystr += f"  mu: {self.mu}"
+        mystr += f"\n  alphas: {self.alphas}"
+        mystr += f"\n  betas: {self.betas}"
+        return mystr
 
 
 # # Example usage
@@ -482,7 +505,7 @@ class MATCH:
             print("not implemented")
         self.type = stype
         self.id = id
-        self.priors = np.zeros(n_agents) + 2
+        self.prior = np.zeros(n_agents) + 2
         self.n_agents = n_agents
         self.commanded_by = np.zeros(n_agents)
         self.commanded_by[self.id] = 1
@@ -493,13 +516,13 @@ class MATCH:
         self.told_to = np.zeros(n_agents)
         self.n_options = 1
 
-    def policy_with_oracle(self, commanded_by, told_to, priors=None):
+    def policy_with_oracle(self, commanded_by, told_to, prior=None):
         self.told_to = np.copy(told_to)
         self.commanded_by = np.copy(commanded_by)
         self.n_options = np.sum(commanded_by)
         self.commanded_by[self.id] = 1
         leader = self.listener.choose(
-            available_teammates=self.commanded_by, priors=priors
+            available_teammates=self.commanded_by, prior=prior
         )
 
         self.leaders = np.zeros(self.n_agents)
@@ -513,23 +536,23 @@ class MATCH:
     def update_listener(self, adv, verbose=0):  # adv is one number
         self.listener.update(arms_pulled=self.leaders, advantage=adv)
 
-    def choose_target(self, available_teammates, priors=None):
-        if priors is None:
-            priors = self.priors
+    def choose_target(self, available_teammates, prior=None):
+        if prior is None:
+            prior = self.prior
         self.targets = self.speaker.choose(
-            available_teammates=available_teammates, priors=priors
+            available_teammates=available_teammates, prior=prior
         )
-        return targets
+        return self.targets
 
     def update_speaker(
-        self, adv, sampled=None, verbose=0
+        self, adv, sampled=None, n_options=1, verbose=0
     ):  # adv is a vector for all the people we spoke too
         if sampled is None:
-            sampled = self.target
+            sampled = self.targets
         adv = adv[sampled]
-        if not sampled == self.id:
-            self.speaker.update(adv, sampled, verbose)
-            self.speaker.update((1 - adv) / (self.n_agents / 2), self.id, verbose)
+        if not sampled[self.id]:
+            self.speaker.update(arms_pulled=sampled, advantage=adv, n_options=n_options)
+            # self.speaker.update((1 - adv) / (self.n_agents / 2), self.id, verbose)
 
     def __str__(self):
         restr = f"sampler type: {self.type}\n"
@@ -553,6 +576,15 @@ def symmetric_advantage(n_agents):
     # randomly generate a matrix where the i,j entry is the negative of the j,i entry
     adv = np.random.rand(n_agents, n_agents) * 5
     adv = adv - adv.T
+    return adv
+
+
+def skill_advantage(n_agents):
+    askills = np.random.rand(n_agents) * 5
+    adv = np.zeros((n_agents, n_agents))
+    for i in range(n_agents):
+        adv[i] = askills - askills[i]
+    print(f"skills: {askills}, advantage: \n{adv}")
     return adv
 
 
@@ -606,7 +638,7 @@ def test_thompsons(n_agents, n_steps, n_trials):
             # print(f"singls arms chosen: {speaker_single_arms_chosen[:, i, j]}")
             # print(f"multi arms chosen: {speaker_multi_arms_chosen[:, i, j]}")
             # input()
-            c = listener.choose(available_teammates, priors=None)
+            c = listener.choose(available_teammates, prior=None)
 
             listener_arms_chosen[c, i, j] = 1.0
 
@@ -679,39 +711,58 @@ if __name__ == "__main__":
     # check_baseline(5)
     n_agents = 5
 
-    test_thompsons(n_agents, 500, 500)
-    exit()
+    # test_thompsons(n_agents, 500, 500)
+    # exit()
     matches = [MATCH(n_agents, i) for i in range(n_agents)]
     # gmatches = [GMATCH(n_agents, i) for i in range(n_agents)]
     # imatches = [IMATCH(n_agents, i) for i in range(n_agents)]
 
-    adv = symmetric_advantage(n_agents)
-    print("advantage: \n", adv)
-    n_steps = 1000
+    adv = skill_advantage(n_agents)
+    n_steps = 500
     for i in range(n_steps):
         targets = np.zeros((n_agents, n_agents))
         speaker_adv = np.zeros((n_agents, n_agents))
         for a in range(n_agents):
-            targets[a] = matches[a].choose_target(None, np.ones(n_agents))
-
+            mtc = matches[a]
+            mtc: MATCH
+            targets[a] = mtc.choose_target(
+                prior=None, available_teammates=np.ones(n_agents)
+            )
         print(f"targets: \n{targets}")
         for a in range(n_agents):
+            mtc = matches[a]
+            mtc: MATCH
             options = targets[:, a].flatten()
-            _, leader = matches[a].policy_with_oracle(options, np.zeros(n_agents))
+            _, leader = mtc.policy_with_oracle(
+                commanded_by=options,
+                prior=np.zeros(n_agents),
+                told_to=np.arange(n_agents),
+            )
             print(f"a: {a}, chosing from: {options}, leader: {leader}")
+            # TODO update all speakers for which the action matches
             speaker_adv[leader, a] = 1 if a != leader else 0
 
         print(f"speaker_adv: \n{speaker_adv}")
-
+        augmented_targets = np.copy(targets)
+        for i in range(n_agents):
+            targets[i, i] = 1
         for speaker in range(n_agents):
-            matches[speaker].update_speaker(speaker_adv[speaker])
+            mtc = matches[speaker]
+            mtc: MATCH
+            matches[speaker].update_speaker(
+                adv=speaker_adv[speaker],
+                n_options=augmented_targets.sum(axis=0).flatten(),
+            )
             print(
-                f"updateing speaker: {speaker} with adv: {speaker_adv[speaker]} and targets: {matches[speaker].target}"
+                f"updateing speaker: {speaker} with adv: {speaker_adv[speaker]} and targets: {matches[speaker].targets} with n_options {np.sum(targets[:, speaker].flatten())}"
             )
         for listener in range(n_agents):
-            ad = np.random.normal(adv[listener, matches[listener].leader], scale=0.02)
+            mtc = matches[listener]
+            mtc: MATCH
+            l = np.argmax(mtc.leaders)
+            ad = np.random.normal(adv[listener, l], scale=0.5)
             print(
-                f" listener: {listener} followed leader: {matches[listener].leader} and got adv {ad}"
+                f" listener: {listener} followed leader: {l} from {mtc.leaders} and got adv {ad}"
             )
             matches[listener].update_listener(ad)
         print("matches: ")
@@ -721,79 +772,8 @@ if __name__ == "__main__":
         input()
 
 
-def test_sampler(
-    n_arms, loc, scale, n_bandits=50, n_steps=500, single=True, debug=True
-):
-    regret = np.zeros((n_bandits, n_steps))
-    arm_freq = np.zeros((n_arms, n_steps))
-    for banditn in range(n_bandits):
-        sampler = Thompson_Beta_Sleepy(
-            n_agents=n_arms,
-            decay_factor=0.95,
-            prior_strength=1,
-            experience_strength=1,
-            id=0,
-            single=single,
-            speaker=True,
-        )
-        print(f"banditn: {banditn}, loc: {loc}")
-        for i in range(n_steps):
-            active = np.random.binomial(1, 0.5, n_arms)
-            arms = sampler.choose(active=active)
-
-            print(f"arms: {arms} chosen from active: {active}, single: {single}")
-            arm_freq[:, i] = arm_freq[:, i] + arms / n_bandits
-            if single:
-                arm = np.argmax(arms)
-                reward = np.random.normal(loc=loc[arm], scale=scale[arm])
-                sampler.update(arms, reward, n_options=1)
-                best = np.argmax(active * loc)
-                print(
-                    f"arm: {arm}, E-reward: {loc[arm]}, E-best: {loc[best]}, observed: {reward}"
-                )
-                regret[banditn, i] = loc[arm] - loc[best]
-            # print(f"arm: {arm}, reward: {reward}, sampler: {sampler}")
-            else:
-                reward = np.random.normal(loc=loc[arms], scale=scale[arms])
-                sampler.update(arms, reward.sum(), n_options=1)
-                best = (active * loc) * (loc > 0).astype(float)
-                print(
-                    f"arm: {arms}, E-reward: {loc[arms].sum()}, E-best: {best.sum()}, observed: {reward.sum()}"
-                )
-                regret[banditn, i] = loc[arms].sum() - best.sum()
-            if debug:
-                print(sampler)
-                input("next itr?")
-
-    return regret, arm_freq
-
-
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-
-    # check_baseline(5)
-    n_agents = 5
-    loc = np.random.rand(n_agents)
-    scale = np.random.rand(n_agents) / 5
-
-    regret, arm_freq = test_sampler(
-        n_arms=n_agents,
-        loc=loc,
-        scale=scale,
-        n_bandits=50,
-        n_steps=500,
-        debug=True,
-    )
-
-    plt.plot(regret.mean(axis=0))
-    plt.title("Regret")
-    plt.show()
-
-    plt.plot(arm_freq)
-    plt.title("Arm Frequency")
-    plt.legend([f"arm {i} m: {loc[i]}, stdv: {scale[i]}" for i in range(n_agents)])
-    plt.show()
-
-    matches = [MATCH(n_agents, i) for i in range(n_agents)]
-    # gmatches = [GMATCH(n_agents, i) for i in range(n_agents)]
-    # imatches = [IMATCH(n_agents, i) for i in range(n_agents)]
+# [[ 0.          0.28526865  1.31651921 -1.36960348  0.54919269]
+#  [-0.28526865  0.          1.03125056 -1.65487212  0.26392404]
+#  [-1.31651921 -1.03125056  0.         -2.68612269 -0.76732652]
+#  [ 1.36960348  1.65487212  2.68612269  0.          1.91879617]
+#  [-0.54919269 -0.26392404  0.76732652 -1.91879617  0.        ]]
