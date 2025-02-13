@@ -123,15 +123,39 @@ class Thompson_Beta_Sleepy(MAB_Sampler):
         self.beta = np.ones(self.n_agents)
         self.avg_num_arms_pulled = n_agents / 2  # Running estimate
         self.arm_pul_probs = np.ones(self.n_agents)
+        self.arm_pul_count = np.zeros(self.n_agents)
 
-    def select_teammates(self, available_teammates):
+        self.active_probs = np.ones(self.n_agents) / 2
+
+    def choose(self, active):
         """Samples success probabilities and selects teammates to suggest to."""
+        print(active)
+        self.active_probs = (
+            self.decay_factor * self.active_probs + (1 - self.decay_factor) * active
+        )
+        need_to_explore = active * self.arm_pul_count
+        if np.sum(need_to_explore) > 0:
+            candidates = np.random.rand(self.n_agents) * (need_to_explore > 0).astype(
+                float
+            )
+            if self.single:
+                selected = (candidates == np.argmax(candidates)).astype(int)
+                self.arm_pul_count += selected
+                return
+            else:
+                selected = (candidates > 0.5).astype(int)
+                if selected(self.id) == 1:
+                    selected = selected * 0
+                    selected[self.id] = 1
+                self.arm_pul_count += selected
+                return selected
+
         sampled_probs = np.random.beta(self.alpha, self.beta)
         print("before avail: ", sampled_probs)
-        sampled_probs[1 - available_teammates] = 0
+        sampled_probs *= active
         print("after avail: ", sampled_probs)
         if self.single:
-            return (sampled_probs == np.argmax(sampled_probs)).astype(int)
+            return (sampled_probs == np.max(sampled_probs)).astype(int)
         else:
             selected = (sampled_probs > 0.5).astype(int)
             if selected(self.id) == 1:
@@ -139,28 +163,33 @@ class Thompson_Beta_Sleepy(MAB_Sampler):
                 selected[self.id] = 1
             return selected
 
-    def update(self, arms_pulled, advantage, n_options):
+    def update(self, arms_pulled, advantage, n_options, debug=False):
         """Updates Beta distributions based on responses and normalizes no-suggestion arm."""
         self.alpha *= self.decay_factor
         self.beta *= self.decay_factor
 
         # Track how many arms are usually pulled when we choose to talk
         if arms_pulled[self.id] == 0:  # If not the "no suggestion" arm
-            self.arm_pul_probs = (self.decay_factor * self.arm_pul_probs) + (
-                1 - self.decay_factor
-            ) * arms_pulled
+            # self.arm_pul_probs = (self.decay_factor * self.arm_pul_probs) + (
+            #     1 - self.decay_factor
+            # ) * arms_pulled
+            if debug:
+                print(f"Debugging Thomp B Sleepy Update: arms pulled: {arms_pulled}")
 
             if self.speaker:
                 # Update the Beta distribution parameters
                 # TODO normalize by probability of arm being pulled
-                self.alpha += (
-                    arms_pulled * advantage * n_options
+                self.alpha = self.alpha + (
+                    arms_pulled * advantage * n_options  # n choices the other guy had
                 )  # Do we need self arm pull prob
-                self.beta += arms_pulled * (1 - advantage)
-                self.alpha[self.id] += (arms_pulled * advantage) / arms_pulled.sum()
+                self.beta = self.beta + (arms_pulled * (1 - advantage))
+                self.alpha[self.id] = (
+                    self.alpha[self.id]
+                    + (arms_pulled * advantage).sum() / arms_pulled.sum()
+                )
                 self.beta[self.id] += (
                     arms_pulled * (1 - advantage)
-                ) / arms_pulled.sum()
+                ).sum() / arms_pulled.sum()
 
             if not self.speaker:
                 # Update the Beta distribution parameters
@@ -170,8 +199,21 @@ class Thompson_Beta_Sleepy(MAB_Sampler):
                 beta_advantage = (
                     arms_pulled * (-advantage) * (advantage < 0).astype(float)
                 )
-                self.alpha += alpha_advantage / self.arm_pul_probs
-                self.beta += beta_advantage / self.arm_pul_probs
+                self.alpha += (
+                    alpha_advantage / self.active_probs
+                )  # need to give more weight to the ones that are pulled rarely
+                self.beta += beta_advantage / self.active_probs
+
+    def dist_mode(self):
+        return self.alpha / (self.alpha + self.beta)
+
+    def __str__(self):
+        restr = f"Thompson Beta Sampler: \n"
+        restr += f"  alpha: {self.alpha}, beta: {self.beta}\n"
+        restr += f"  avg num arms pulled: {self.avg_num_arms_pulled}\n"
+        restr += f"  arm pull probs: {self.arm_pul_probs}\n"
+        restr += f"  arm pull count: {self.arm_pul_count}\n"
+        return restr
 
 
 # # Example usage
@@ -179,15 +221,15 @@ class Thompson_Beta_Sleepy(MAB_Sampler):
 # agent = Thompson_Dirichlet_Combinatorial_Semi_Sleepy(num_teammates, decay_factor=0.9)
 
 # for t in range(100):  # Simulate 100 time steps
-#     available_teammates = np.random.choice(
+#     active = np.random.choice(
 #         range(num_teammates),
 #         size=np.random.randint(1, num_teammates + 1),
 #         replace=False,
 #     )
-#     chosen_teammate = agent.choose(available_teammates)
+#     chosen_teammate = agent.choose(active)
 
 #     td_error = np.random.rand()  # Simulated TD error as reward
-#     agent.update(chosen_teammate, td_error, available_teammates)
+#     agent.update(chosen_teammate, td_error, active)
 
 #     print(f"Step {t}, Chose Teammate {chosen_teammate}, TD Error: {td_error:.2f}")
 
@@ -292,7 +334,6 @@ class UCB_Multinomial(MAB_Sampler):
 
 
 def check_baseline(n_agents, trials=1000):
-
     tot_arr = np.zeros((n_agents))
     for i in range(trials):
         tot_arr = tot_arr + (np.random.rand(n_agents, n_agents) > 0.5).astype(int).sum(
@@ -311,7 +352,7 @@ class MATCH:
                 experience_strength=1,
                 speaker=False,
                 id=id,
-                single=single,
+                single=True,
                 n_explore=2,
             )
             self.speaker = Thompson_Beta_Sleepy(
@@ -389,14 +430,7 @@ def symmetric_advantage(n_agents):
     return adv
 
 
-if __name__ == "__main__":
-    # check_baseline(5)
-    n_agents = 5
-
-    matches = [MATCH(n_agents, i) for i in range(n_agents)]
-    # gmatches = [GMATCH(n_agents, i) for i in range(n_agents)]
-    # imatches = [IMATCH(n_agents, i) for i in range(n_agents)]
-
+def test_match(n_agents):
     adv = symmetric_advantage(n_agents)
     print("advantage: \n", adv)
     n_steps = 1000
@@ -431,3 +465,81 @@ if __name__ == "__main__":
             print(m)
 
         input()
+
+
+def test_sampler(
+    n_arms, loc, scale, n_bandits=50, n_steps=500, single=True, debug=True
+):
+    regret = np.zeros((n_bandits, n_steps))
+    arm_freq = np.zeros((n_arms, n_steps))
+    for banditn in range(n_bandits):
+        sampler = Thompson_Beta_Sleepy(
+            n_agents=n_arms,
+            decay_factor=0.95,
+            prior_strength=1,
+            experience_strength=1,
+            id=0,
+            single=single,
+            speaker=True,
+        )
+        print(f"banditn: {banditn}, loc: {loc}")
+        for i in range(n_steps):
+            active = np.random.binomial(1, 0.5, n_arms)
+            arms = sampler.choose(active=active)
+
+            print(f"arms: {arms} chosen from active: {active}, single: {single}")
+            arm_freq[:, i] = arm_freq[:, i] + arms / n_bandits
+            if single:
+                arm = np.argmax(arms)
+                reward = np.random.normal(loc=loc[arm], scale=scale[arm])
+                sampler.update(arms, reward, n_options=1)
+                best = np.argmax(active * loc)
+                print(
+                    f"arm: {arm}, E-reward: {loc[arm]}, E-best: {loc[best]}, observed: {reward}"
+                )
+                regret[banditn, i] = loc[arm] - loc[best]
+            # print(f"arm: {arm}, reward: {reward}, sampler: {sampler}")
+            else:
+                reward = np.random.normal(loc=loc[arms], scale=scale[arms])
+                sampler.update(arms, reward.sum(), n_options=1)
+                best = (active * loc) * (loc > 0).astype(float)
+                print(
+                    f"arm: {arms}, E-reward: {loc[arms].sum()}, E-best: {best.sum()}, observed: {reward.sum()}"
+                )
+                regret[banditn, i] = loc[arms].sum() - best.sum()
+            if debug:
+                print(sampler)
+                input("next itr?")
+
+    return regret, arm_freq
+
+
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+
+    # check_baseline(5)
+    n_agents = 5
+    loc = np.random.rand(n_agents)
+    scale = np.random.rand(n_agents) / 5
+
+    regret, arm_freq = test_sampler(
+        n_arms=n_agents,
+        loc=loc,
+        scale=scale,
+        n_bandits=50,
+        n_steps=500,
+        debug=True,
+    )
+
+    plt.plot(regret.mean(axis=0))
+    plt.title("Regret")
+    plt.show()
+
+    plt.plot(arm_freq)
+    plt.title("Arm Frequency")
+    plt.legend([f"arm {i} m: {loc[i]}, stdv: {scale[i]}" for i in range(n_agents)])
+    plt.show()
+
+    matches = [MATCH(n_agents, i) for i in range(n_agents)]
+    # gmatches = [GMATCH(n_agents, i) for i in range(n_agents)]
+    # imatches = [IMATCH(n_agents, i) for i in range(n_agents)]
