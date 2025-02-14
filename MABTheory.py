@@ -152,16 +152,14 @@ class Thompson_Beta_CombiSemi(MAB_Sampler):
         # input()
         # print("alpha beta: ", self.alpha, self.beta)
         if self.single:
-            # print(f"sampled probs: {sampled_probs}")
-            ss = sampled_probs == np.max(sampled_probs)
-            # print(ss.astype(int))
-            return ss.astype(int)
+            ss = (sampled_probs == np.max(sampled_probs)).astype(int)
         else:
-            selected = (sampled_probs > 0.5).astype(int)
-            if selected[self.id] == 1:
-                selected = selected * 0
-                selected[self.id] = 1
-            return selected
+            ss = (sampled_probs > 0.5).astype(int)
+
+        if ss[self.id] == 1:
+            ss = np.zeros(self.n_agents)
+            ss[self.id] = 1
+        return ss
 
     def update(self, arms_pulled, advantage, n_options=1, debug=False):
         """Updates Beta distributions based on responses and normalizes no-suggestion arm."""
@@ -169,13 +167,13 @@ class Thompson_Beta_CombiSemi(MAB_Sampler):
         self.alpha *= self.decay_factor
         self.beta *= self.decay_factor
         # print(f"alpha: {self.alpha}, beta: {self.beta}: single: {self.single}")
-
+        # print(f"speaker [{self.id}] arms pulled {arms_pulled}")
         if arms_pulled.sum() == 0:
             return 0
 
         # print(f"arms pulled: {arms_pulled}, n options: {n_options}")
         # Track how many arms are usually pulled when we choose to talk
-        if arms_pulled[self.id] == 0:  # If not the "no suggestion" arm
+        if not arms_pulled[self.id]:  # If not the "no suggestion" arm
             # self.arm_pul_probs = (self.decay_factor * self.arm_pul_probs) + (
             #     1 - self.decay_factor
             # ) * arms_pulled
@@ -184,14 +182,13 @@ class Thompson_Beta_CombiSemi(MAB_Sampler):
 
             # print(advantage * arms_pulled)
             # Update the Beta distribution parameters
-            # TODO normalize by probability of arm being pulled
-            print(
-                f"updateing speaker {self.id} with arms pulled {arms_pulled}, adv: {advantage}, noptions: {n_options}"
-            )
+            # print(
+            #    f"updateing speaker {self.id} with arms pulled {arms_pulled}, adv: {advantage}, noptions: {n_options}"
+            # )
             self.alpha += (
                 arms_pulled * advantage * n_options
             ) * self.exp_strength  # Do we need self arm pull prob
-            self.beta += arms_pulled * (1 - advantage)
+            self.beta += arms_pulled * (1 - advantage) * self.exp_strength
             self.beta[self.id] += (
                 (advantage * arms_pulled * n_options).sum()
                 / arms_pulled.sum()
@@ -548,11 +545,10 @@ class MATCH:
         self, adv, sampled=None, n_options=1, verbose=0
     ):  # adv is a vector for all the people we spoke too
         if sampled is None:
-            sampled = self.targets
-        adv = adv[sampled]
-        if not sampled[self.id]:
-            self.speaker.update(arms_pulled=sampled, advantage=adv, n_options=n_options)
-            # self.speaker.update((1 - adv) / (self.n_agents / 2), self.id, verbose)
+            sampled = self.targets.astype(bool)
+        # adv = adv[sampled]
+        self.speaker.update(arms_pulled=sampled, advantage=adv, n_options=n_options)
+        # self.speaker.update((1 - adv) / (self.n_agents / 2), self.id, verbose)
 
     def __str__(self):
         restr = f"sampler type: {self.type}\n"
@@ -585,10 +581,14 @@ def skill_advantage(n_agents):
     for i in range(n_agents):
         adv[i] = askills - askills[i]
     print(f"skills: {askills}, advantage: \n{adv}")
-    return adv
+    return adv, askills
 
 
-def test_thompsons(n_agents, n_steps, n_trials):
+def test_thompsons(
+    n_agents,
+    n_steps,
+    n_trials,
+):
 
     reward_loc = np.random.rand(n_agents) * 5 - 2
     reward_scale = np.random.rand(n_agents) + 0.1
@@ -707,18 +707,9 @@ def test_thompsons(n_agents, n_steps, n_trials):
     plt.show()
 
 
-if __name__ == "__main__":
-    # check_baseline(5)
-    n_agents = 5
-
-    # test_thompsons(n_agents, 500, 500)
-    # exit()
-    matches = [MATCH(n_agents, i) for i in range(n_agents)]
-    # gmatches = [GMATCH(n_agents, i) for i in range(n_agents)]
-    # imatches = [IMATCH(n_agents, i) for i in range(n_agents)]
-
-    adv = skill_advantage(n_agents)
+def test_match(n_agents, n_steps, n_trials, adv, verbose=False, skillvec=np.ones()):
     n_steps = 500
+    matches = [MATCH(n_agents, i) for i in range(n_agents)]
     for i in range(n_steps):
         targets = np.zeros((n_agents, n_agents))
         speaker_adv = np.zeros((n_agents, n_agents))
@@ -728,7 +719,8 @@ if __name__ == "__main__":
             targets[a] = mtc.choose_target(
                 prior=None, available_teammates=np.ones(n_agents)
             )
-        print(f"targets: \n{targets}")
+        if verbose:
+            print(f"targets: \n{targets}")
         for a in range(n_agents):
             mtc = matches[a]
             mtc: MATCH
@@ -738,14 +730,16 @@ if __name__ == "__main__":
                 prior=np.zeros(n_agents),
                 told_to=np.arange(n_agents),
             )
-            print(f"a: {a}, chosing from: {options}, leader: {leader}")
+            if verbose:
+                print(f"a: {a}, chosing from: {options}, leader: {leader}")
             # TODO update all speakers for which the action matches
             speaker_adv[leader, a] = 1 if a != leader else 0
 
-        print(f"speaker_adv: \n{speaker_adv}")
+        if verbose:
+            print(f"speaker_adv: \n{speaker_adv}")
         augmented_targets = np.copy(targets)
         for i in range(n_agents):
-            targets[i, i] = 1
+            augmented_targets[i, i] = 1
         for speaker in range(n_agents):
             mtc = matches[speaker]
             mtc: MATCH
@@ -753,27 +747,53 @@ if __name__ == "__main__":
                 adv=speaker_adv[speaker],
                 n_options=augmented_targets.sum(axis=0).flatten(),
             )
-            print(
-                f"updateing speaker: {speaker} with adv: {speaker_adv[speaker]} and targets: {matches[speaker].targets} with n_options {np.sum(targets[:, speaker].flatten())}"
-            )
+            if verbose:
+                print(
+                    f"updateing speaker: {speaker} with adv: {speaker_adv[speaker]} and targets: {matches[speaker].targets} with n_options {augmented_targets.sum(axis=0).flatten()}"
+                )
         for listener in range(n_agents):
             mtc = matches[listener]
             mtc: MATCH
             l = np.argmax(mtc.leaders)
             ad = np.random.normal(adv[listener, l], scale=0.5)
-            print(
-                f" listener: {listener} followed leader: {l} from {mtc.leaders} and got adv {ad}"
-            )
+            if verbose:
+                print(
+                    f" listener: {listener} followed leader: {l} from {mtc.leaders} and got adv {ad}"
+                )
             matches[listener].update_listener(ad)
-        print("matches: ")
-        for m in matches:
-            print(m)
+        if verbose:
+            print("matches: ")
+        if verbose:
+            for m in matches:
+                print(m)
 
-        input()
+        if verbose:
+            input()
 
 
-# [[ 0.          0.28526865  1.31651921 -1.36960348  0.54919269]
-#  [-0.28526865  0.          1.03125056 -1.65487212  0.26392404]
-#  [-1.31651921 -1.03125056  0.         -2.68612269 -0.76732652]
-#  [ 1.36960348  1.65487212  2.68612269  0.          1.91879617]
-#  [-0.54919269 -0.26392404  0.76732652 -1.91879617  0.        ]]
+if __name__ == "__main__":
+    # check_baseline(5)
+    n_agents = 5
+    n_steps = 500
+    n_trials = 100
+    # test_thompsons(n_agents, 500, 500)
+    # exit()
+
+    # gmatches = [GMATCH(n_agents, i) for i in range(n_agents)]
+    # imatches = [IMATCH(n_agents, i) for i in range(n_agents)]
+
+    adv, skillvec = skill_advantage(n_agents)
+    test_match(
+        n_agents=n_agents,
+        n_steps=n_steps,
+        n_trials=n_trials,
+        adv=adv,
+        verbose=True,
+        skillvec=skillvec,
+    )
+
+# [[ 0.          1.98644892  2.82382293  1.67797208  3.96014136]
+#  [-1.98644892  0.          0.83737401 -0.30847683  1.97369245]
+#  [-2.82382293 -0.83737401  0.         -1.14585085  1.13631843]
+#  [-1.67797208  0.30847683  1.14585085  0.          2.28216928]
+#  [-3.96014136 -1.97369245 -1.13631843 -2.28216928  0.        ]]
