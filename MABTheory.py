@@ -2,6 +2,8 @@ import numpy as np
 from abc import ABC, abstractmethod
 from scipy.stats import invgamma, norm
 import matplotlib.pyplot as plt
+from flexibuff import FlexibleBuffer
+from flexibuddiesrl import Agent
 
 
 class MAB_Sampler(ABC):
@@ -598,6 +600,81 @@ class MATCH:
         restr += "\nListener stuff: " + str(self.listener)
         restr += "\nSpeaker stuff: " + str(self.speaker)
         return restr
+
+    def calc_reward(
+        self,
+        buffer: FlexibleBuffer,
+        agent: Agent,
+        idx=np.arange(start=1, stop=10, step=1),
+        adv_type="gae",
+        r_key="global_rewards",
+        s_key="obs",
+        sp_key="obs_",
+        t_key="terminated",
+        v_key=None,
+        legal_actions=None,
+        gamma=0.99,
+        gae_lambda=0.95,
+        k_step=5,
+    ):
+        # rewards = buffer.__dict__[r_key][index_start:index_end]
+        # if v_key is None:
+        #     values = agent.expected_V(buffer.__dict__[s_key][self.id, :, :])
+        # else:
+        #     values = buffer.__dict__[values][self.id, index_start:index_end]
+        # terminated = buffer.__dict__[t_key]
+        samp = buffer.sample_transitions(idx=idx)
+
+        # TODO validate this code with an agent
+        l_ac = None
+        l_ac_ = None
+        if legal_actions:
+            l_ac = []
+            l_ac_ = []
+            for j in range(len(buffer.action_mask_)):
+                l_ac.append(samp.action_mask[j][self.id])
+                l_ac_.append(samp.action_mask_[j][self.id, idx[-1], :])
+
+        if v_key is not None:
+            values = samp.__dict__[v_key][self.id]
+        else:
+            values = agent.expected_V(
+                samp.__dict__[s_key][self.id],
+                legal_action=l_ac,
+            )
+        last_value = agent.expected_V(
+            samp.__dict__[sp_key][self.id, -1],
+            legal_action=l_ac_,
+        )
+        adv = 0
+        if adv_type == "gae":
+            adv = FlexibleBuffer.GAE(
+                rewards=samp.__dict__[r_key],
+                values=values,
+                terminated=samp.terminated,
+                last_value=last_value,
+                gae_lambda=gae_lambda,
+                gamma=gamma,
+            )  # TODO add if statement for individual rewards
+        elif adv_type == "td":
+            FlexibleBuffer.K_Step_TD(
+                rewards=samp.__dict__[r_key],
+                values=values,
+                terminated=samp.terminated,
+                last_value=last_value,
+                gamma=gamma,
+                k=k_step,
+            )
+        elif adv_type == "monte":
+            FlexibleBuffer.G(
+                rewards=samp.__dict__[r_key],
+                values=values,
+                terminated=samp.terminated,
+                last_value=last_value,
+                gamma=gamma,
+                k=k_step,
+            )
+            print("adv_type not implemented")
 
 
 class GMATCH:
