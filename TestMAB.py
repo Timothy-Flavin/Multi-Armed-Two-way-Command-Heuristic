@@ -93,28 +93,33 @@ def actions_match(
             print(match_modules[1])
         if not torch.is_tensor(obs):
             obs = torch.from_numpy(obs).float().to(device)
+
+        command_targets = np.zeros((n_agents, n_agents))
+        command_contents = np.zeros((n_agents, n_agents))
         actions = np.zeros(shape=n_agents, dtype=np.int64)
         la = np.ones(shape=(n_agents, n_actions))
         for agent_id in range(n_agents):
             avail = env.get_avail_agent_actions(agent_id)
             if avail is not None:
                 la[agent_id] = np.array(avail)
+        if verbose:
+            print(f"la: {la}")
 
         # Update the match modules with the last n_steps of memory if this is a match update step
         if current_step != 0 and current_step % n_steps == 0:
             speaker_adv = np.zeros((n_agents, n_agents))
             for agent_id in range(n_agents):
                 command_targets[agent_id] = match_modules[agent_id].targets
-
+            if verbose:
+                print(f"Updating MATCH from Command matrix: {command_targets}")
+            idx = np.arange(memory.idx - n_steps, memory.idx)
+            for ix in range(idx.shape[0]):
+                if idx[ix] < 0:
+                    idx[ix] += memory.mem_size
+            if verbose:
+                print(f"idx: {idx}")
             for agent_id in range(n_agents):
                 # Get the steps that we have recorded since last match update
-                idx = np.arange(memory.idx - n_steps, memory.idx)
-                for ix in range(idx.shape[0]):
-                    if idx[ix] < 0:
-                        idx[ix] += memory.mem_size
-                if verbose:
-                    print(f" match idx: {idx}")
-
                 adv, arms = match_modules[agent_id].calc_reward(
                     buffer=memory,
                     agent=models[agent_id],
@@ -127,11 +132,20 @@ def actions_match(
                     share_listener_rewards=share_listener_rewards,
                     n_same_actions_required=n_same_actions_required,
                 )
+                if share_listener_rewards:
+                    arm_bool = arms > 0
+                else:
+                    arm_bool = arms == np.max(
+                        arms
+                    )  # maybe replace this with armbool[selected]=True
                 match_modules[agent_id].update_listener(
-                    adv=adv, arms=arms > 0, verbose=verbose
+                    adv=adv, arms=arm_bool, verbose=verbose
                 )
                 speaker_adv[:, agent_id] = arms
-
+                if verbose:
+                    print(
+                        f"  a_id: \n  {agent_id}\n  adv: \n  {adv},\n arms: \n  {arms}\n  speaker adv: \n  {speaker_adv[:, agent_id]}"
+                    )
             augmented_targets = command_targets.copy()
             for agent_id in range(n_agents):
                 augmented_targets[agent_id, agent_id] = 1
@@ -143,20 +157,15 @@ def actions_match(
                 )
 
         # Set up the command matrix from scratch if this is a command step
-        command_targets = np.zeros((n_agents, n_agents))
-        command_contents = np.zeros((n_agents, n_agents))
         if current_step % n_steps == 0:
             if verbose:
-                print("\nDoing this episode's commands now")
+                print("\nUpdating content and targets because it's an update episode")
             # later will be 3d for actions with more than 1 number
             for agent_id in range(n_agents):
                 # Get the command targets from each agent 'agent_id'
                 command_targets[agent_id] = match_modules[agent_id].choose_target(
                     prior=priors[agent_id], available_teammates=np.ones(n_agents)
                 )
-
-                if verbose:
-                    print(f"aid: {agent_id} chose: {target} to command")
 
                 # Get the command contents for each agent
                 for target in range(n_agents):
@@ -167,11 +176,14 @@ def actions_match(
                         command_contents[agent_id, target] = act[
                             0
                         ]  # TODO: act is a tensor for multi output domains
+
             for agent_id in range(n_agents):
                 match_modules[agent_id].command_contents = command_contents[agent_id]
 
         # If it is not an update turn, just use the last command targets but current command contents
         else:
+            if verbose:
+                print("\nUpdating command content but not targets")
             for agent_id in range(n_agents):
                 command_targets[agent_id] = match_modules[agent_id].targets
                 for target in range(n_agents):
@@ -180,11 +192,9 @@ def actions_match(
                             obs[target], la[target]
                         )
                         command_contents[agent_id, target] = act[0]
-
         if verbose:
-            print(
-                f"Command matrix: {command_targets}, command contents: {command_contents}"
-            )
+            print(f"command_targets: {command_targets}")
+            print(f"command_contents: {command_contents}")
 
         # choose who to listen to and update oracles from last time?
         for agent_id in range(n_agents):
@@ -196,9 +206,15 @@ def actions_match(
                     told_to=command_contents[:, agent_id].copy().flatten(),
                 )
                 if verbose:
-                    print(f"a: {agent_id}, chosing from: {options}, leader: {leader}")
+                    print(
+                        f"a: {agent_id}, chosing new action {action} from: {options}, leader: {match_modules[agent_id].selected}"
+                    )
             else:  # Keep listening to the same one if this is not an update step
-                action = command_contents[agent_id, MATCH[agent_id].leader]
+                action = command_contents[match_modules[agent_id].selected, agent_id]
+                if verbose:
+                    print(
+                        f"not updating, listening to [{action}] from the same one as last time: {match_modules[agent_id].selected}"
+                    )
             actions[agent_id] = action
         if verbose:
             input()
