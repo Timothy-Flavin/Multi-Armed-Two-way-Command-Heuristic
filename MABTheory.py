@@ -555,6 +555,7 @@ class MATCH:
         # so that they can be used during update.
         self.told_to = np.zeros(n_agents)
         self.n_options = 1
+        self.selected = 0
 
     def policy_with_oracle(self, commanded_by, told_to, prior=None):
         self.told_to = np.copy(told_to)
@@ -567,6 +568,7 @@ class MATCH:
 
         self.leaders = np.zeros(self.n_agents)
         self.leaders[leader] = 1
+        self.selected = leader
         if self.listen_to_duplicate:
             self.leaders[told_to == told_to[leader]] = 1
             # TODO for continuous actions, add an epsilon for similar actions
@@ -616,6 +618,7 @@ class MATCH:
         gamma=0.99,
         gae_lambda=0.95,
         k_step=5,
+        device="cuda",
     ):
         # rewards = buffer.__dict__[r_key][index_start:index_end]
         # if v_key is None:
@@ -623,7 +626,7 @@ class MATCH:
         # else:
         #     values = buffer.__dict__[values][self.id, index_start:index_end]
         # terminated = buffer.__dict__[t_key]
-        samp = buffer.sample_transitions(idx=idx)
+        samp = buffer.sample_transitions(idx=idx, as_torch=True, device=device)
 
         # TODO validate this code with an agent
         l_ac = None
@@ -657,7 +660,7 @@ class MATCH:
                 gamma=gamma,
             )  # TODO add if statement for individual rewards
         elif adv_type == "td":
-            FlexibleBuffer.K_Step_TD(
+            adv = FlexibleBuffer.K_Step_TD(
                 rewards=samp.__dict__[r_key],
                 values=values,
                 terminated=samp.terminated,
@@ -666,15 +669,26 @@ class MATCH:
                 k=k_step,
             )
         elif adv_type == "monte":
-            FlexibleBuffer.G(
+            adv = FlexibleBuffer.G(
                 rewards=samp.__dict__[r_key],
-                values=values,
                 terminated=samp.terminated,
                 last_value=last_value,
                 gamma=gamma,
-                k=k_step,
             )
+            adv = adv - values
             print("adv_type not implemented")
+        elif (
+            adv_type == "ep_avg"
+        ):  # Take td for each episode with the first and last value and avg them
+            print("ep_avg not implemented")
+        elif (
+            adv_type == "truncate"
+        ):  # if a terminal state is reached, ignore the rest of the episodes
+            print("truncate not implemented")
+        else:
+            print("adv_type not recognized")
+
+        return adv.sum().detach().cpu().numpy()
 
 
 class GMATCH:
@@ -879,7 +893,7 @@ def test_match(n_agents, n_steps, n_trials, adv, verbose=False, skillvec=np.ones
             for listener in range(n_agents):
                 mtc = matches[listener]
                 mtc: MATCH
-                l = np.argmax(mtc.leaders)
+                l = mtc.selected
                 ad = np.random.normal(loc=adv[listener, l], scale=0.5)
                 if verbose:
                     print(
