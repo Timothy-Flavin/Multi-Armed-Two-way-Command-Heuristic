@@ -270,17 +270,18 @@ def run_multi_agent_episodes(
     epsilon=0.1,  # For Egreedy episodes
     supervised_reg=False,  # If true, will learn supervised objective as well
     expert_reward=False,
-    central_mixer=None,
     episodic=False,
     learn_during_rand=False,
     display=False,
     graph_progress=False,
     reward_checkpoint_bin=[10, 40, 60, 70, 80, 100],  #   #
     model_path="",
-    MATCH=None,
+    use_match=False,
     n_shot=1,
     n_step=5,
     online=False,
+    verbose=False,
+    save_models=False,
 ):
     print(
         f"Running {episode_type} episodes online: {online}, episodic: {episodic} ms:{max_steps}"
@@ -298,12 +299,6 @@ def run_multi_agent_episodes(
     human_likeness = []
     loss_hist = []
 
-    quit_early = False
-    if episode_type == Episode_Type.HUMAN:  # RAND, EVAL, HUMAN, EGREEDY
-        quit_early = (
-            input("Would you like to record a human episode? (y,n)").lower() == "n"
-        )
-
     while overall_step < max_steps and not quit_early:
         # print(
         #    f"overall: {overall_step} ep# {current_episode}"
@@ -320,56 +315,36 @@ def run_multi_agent_episodes(
         current_episode_step = 0
 
         if current_episode % n_shot == 0:
-            # print("Resetting match samplers")
-            MATCH_Wrappers = [
-                Agent_With_Oracle(
-                    agent=models[0], n_agents=n_agents, oracle_num=0, sampler="Thompson"
-                ),
-                Agent_With_Oracle(
-                    agent=models[1], n_agents=n_agents, oracle_num=1, sampler="Thompson"
-                ),
-            ]
-        # if current_episode % n_shot == (n_shot - 1):
-        # for aid in range(n_agents):
-        # MATCH_Wrappers[aid].greed()
+            matches = (
+                [  # TODO: Make match have a reset function instead of making new ones
+                    MATCH(n_agents, i, single=False, lambda_=0.90, gamma=0.90)
+                    for i in range(n_agents)
+                ]
+            )
 
         while not done:
             actions, la = None, None
-            if MATCH is None:
-                actions, la, log_probs = actions_no_match(
-                    memory,
-                    models,
-                    episode_type,
-                    epsilon,
-                    obs,
-                    n_agents,
-                    n_actions,
-                    env,
-                )
-            else:
-                actions, la, log_probs = actions_match(
-                    memory,
-                    models,
-                    episode_type,
-                    epsilon,
-                    obs,
-                    n_agents,
-                    n_actions,
-                    env,
-                    MATCH_Wrappers,
-                    n_steps=n_step,
-                    current_step=current_episode_step,
-                    device=device,
-                )
+
+            actions, la, log_probs = actions_match(
+                memory=memory,
+                models=models,
+                obs=obs,
+                n_agents=n_agents,
+                n_actions=n_actions,
+                env=env,
+                match_modules=matches,
+                n_steps=n_step,
+                current_step=current_episode_step,
+                device=device,
+                verbose=verbose,
+                share_listener_rewards=False,
+                n_same_actions_required=1,
+            )
             # input()
             if display:
                 env.display(obs, None, 0)
 
             obs_, reward, terminated, truncated, info = env.step(actions)
-
-            if MATCH is not None:
-                for aid in range(n_agents):
-                    MATCH_Wrappers[aid].record_reward(reward)
 
             # env.display(obs, avail_actions, agent_id)
             ep_reward_hist[current_episode] += reward
@@ -384,20 +359,18 @@ def run_multi_agent_episodes(
             # print(actions)
             # print(env.env)
 
-            if episode_type != Episode_Type.EVAL:
-
-                memory.save_transition(
-                    terminated=terminated,
-                    action_mask=[la],  # list for action dims
-                    registered_vals={
-                        "obs": obs,
-                        "obs_": obs_,
-                        "discrete_actions": actions,
-                        "global_rewards": reward,
-                        "global_auxiliary_rewards": er,
-                        "discrete_log_probs": log_probs,
-                    },
-                )
+            memory.save_transition(
+                terminated=terminated,
+                action_mask=[la],  # list for action dims
+                registered_vals={
+                    "obs": obs,
+                    "obs_": obs_,
+                    "discrete_actions": actions,
+                    "global_rewards": reward,
+                    "global_auxiliary_rewards": er,
+                    "discrete_log_probs": log_probs,
+                },
+            )
 
             if episode_type == Episode_Type.RL:
                 inds = np.arange(n_agents)
@@ -424,45 +397,11 @@ def run_multi_agent_episodes(
                         )
                     loss_hist[-1] += closs
 
-                if supervised_reg:  # TODO: make sample in order for rnn
-                    exp = imitation_memory.sample_transitions(
-                        256, as_torch=True, device=device
-                    )
-                    # print(exp)
-                    models[agent_id].imitation_learn(
-                        exp.obs[agent_id], exp.discrete_actions[agent_id]
-                    )
-
-            if episode_type == Episode_Type.RAND:
-                print("yeehaw")
-                if learn_during_rand:
-                    for agent_id in range(n_agents):
-                        exp = memory.sample_episodes(256, as_torch=True, device=device)
-                        for e in exp:
-                            models[agent_id].reinforcement_learn(
-                                e, agent_id, critic_only=True
-                            )
             overall_step += 1
             current_episode_step += 1
-            # print(obs)
-            # print(obs_)
             obs = obs_
 
-        hl = np.zeros(n_agents)
-        if episode_type != Episode_Type.EVAL:
-            if imitation_memory is not None and imitation_memory.steps_recorded > 100:
-                for hi in range(n_agents):
-                    if memory.steps_recorded < 256:
-                        break
-                    f_batches = imitation_memory.sample_episodes(
-                        max_batch_size=256, as_torch=True, device=device
-                    )
-                    hl[hi] = check_discrete_human_likeness(
-                        models[agent_id], f_batches, hi
-                    )
-
         # if current_episode % n_shot == (n_shot - 1):
-        human_likeness.append(hl)
         recent_rewards.append(ep_reward_hist[-1])
         recent_expert_rewards.append(ep_expert_reward_hist[-1])
 
@@ -491,7 +430,11 @@ def run_multi_agent_episodes(
                 f"Return: {ep_reward_hist[current_episode]:<5.1f} smooth: {smooth_reward_hist[-1]}"
             )
 
-        if episode_type == Episode_Type.RL and len(reward_checkpoint_bin) > 0:
+        if (
+            save_models
+            and episode_type == Episode_Type.RL
+            and len(reward_checkpoint_bin) > 0
+        ):
             mbin = min(reward_checkpoint_bin)
             # print(smooth_reward_hist[-1])
             # print(mbin)
@@ -505,46 +448,6 @@ def run_multi_agent_episodes(
                 )
                 reward_checkpoint_bin.pop(reward_checkpoint_bin.index(mbin))
 
-        if episode_type == Episode_Type.RL and overall_step >= max_steps:
-            models[agent_id].save(
-                model_path
-                + f"r_{smooth_reward_hist[-1]}_supreg{supervised_reg}_{agent_id}/"
-            )
-
-        if episode_type == Episode_Type.HUMAN:
-            save = input("Save episode? ") == "y"
-            if save:
-                print("saved to drive")
-                # print(memory)
-                FlexibleBuffer.save(memory)
-                idx_before = memory.idx
-                steps_recorded_before = memory.steps_recorded
-                ep_inds = memory.episode_inds
-                ep_lens = memory.episode_lens
-            else:
-                memory.idx = idx_before
-                memory.steps_recorded = steps_recorded_before
-                memory.episode_inds = ep_inds
-                memory.episode_lens = ep_lens
-            quit_early = input("Another episode?").lower() == "n"
-
-        if episode_type == Episode_Type.RAND:
-            if recent_rewards[-1] > 0.1:
-                print("good episode, saving")
-                idx_before = memory.idx
-                steps_recorded_before = memory.steps_recorded
-                ep_inds = memory.episode_inds
-                ep_lens = memory.episode_lens
-            else:
-                print("bad episode, not saving")
-                # overall_step = overall_before
-                # memory.idx = idx_before
-                # memory.steps_recorded = steps_recorded_before
-                # memory.episode_inds = ep_inds
-                # memory.episode_lens = ep_lens
-        # print(
-        #    f"ce: {current_episode}, {current_episode % 50 == 0} and {current_episode > 1} and {graph_progress}"
-        # )
         if current_episode % 500 == 0 and current_episode > 1 and graph_progress:
             smr = np.array(smooth_reward_hist)
             smer = np.array(smooth_expert_reward_hist)
@@ -591,54 +494,12 @@ def run_multi_agent_episodes(
         # print("Samplers summary: ")
         # for aid in range(n_agents):
         #    MATCH_Wrappers[aid].final_dir(prior=None)
-    if (
-        episode_type == Episode_Type.RL
-        or episode_type == Episode_Type.RAND
-        or episode_type == Episode_Type.EGREEDY
-        or episode_type == Episode_Type.EVAL
-    ):
+    if episode_type == Episode_Type.RL or episode_type == Episode_Type.EVAL:
         return (
             np.array(smooth_reward_hist),
             np.array(smooth_expert_reward_hist),
             np.array(human_likeness),
         )
-
-
-def offline_update(models: list[Agent], n, memory: FlexibleBuffer, verbose=False):
-    print(memory)
-    if memory.steps_recorded < 10:
-        return [0], [0], [0]
-    critic_loss = []
-    actor_loss = []
-    hlike = []
-    for i in range(n):
-        batches = memory.sample_episodes(
-            max_batch_size=400, as_torch=True, device=device
-        )
-        b: FlexiBatch
-        for b in batches:
-            # print(b.terminated)
-            for ag in range(n_agents):
-                aloss, closs = models[ag].reinforcement_learn(b, ag, True)
-                critic_loss.append(closs)
-                actor_loss.append(
-                    models[ag].imitation_learn(b.obs[ag], b.discrete_actions[ag])
-                )
-            for id in range(n_agents):
-                hlike.append(check_discrete_human_likeness(models[ag], batches, id))
-
-    if True:
-        # for h in hlike:
-        # h2.append(h.mean())
-        critic_loss = np.array(critic_loss)
-        crmax = np.max(critic_loss)
-        plt.plot(critic_loss / crmax)
-        plt.plot(actor_loss)
-        plt.plot(hlike)
-        plt.legend([f"Critic Loss {crmax}", "Actor Imitation loss", "Human Likeness"])
-        plt.show()
-
-    return critic_loss, actor_loss, hlike
 
 
 def get_agent(obs, args, device, n_actions):
