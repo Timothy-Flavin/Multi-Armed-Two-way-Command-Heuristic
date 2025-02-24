@@ -2,6 +2,8 @@ import numpy as np
 from abc import ABC, abstractmethod
 from scipy.stats import invgamma, norm
 import matplotlib.pyplot as plt
+from flexibuff import FlexibleBuffer
+from flexibuddiesrl import Agent
 
 
 class MAB_Sampler(ABC):
@@ -319,16 +321,8 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
         return arm
 
     def update(self, arms_pulled, advantage):
-        # Apply time decay to previously active arms
-        # for a in range(self.num_arms):
-        #    if a != arm:
-        #        self.beta[a] *= self.gamma  # Increase uncertainty for inactive arms
-        # print(self.betas, " before")
+        """Updates Beta distributions based on responses and normalizes no-suggestion arm."""
 
-        # print("alphas betas ", self.alphas, self.betas)
-        # print("normal means before", self.mu)
-        # print("normal sigmas before", invgamma.mean(a=self.alphas, scale=self.betas))
-        # input()
         self.alphas *= self.gamma  # TODO cant shrink past 1, also this feels wrong
         self.betas *= self.gamma
 
@@ -339,34 +333,28 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
 
         self.alphas = np.maximum(self.alphas, self.alpha_0)
         self.betas = np.maximum(self.betas, self.beta_0)
-        # self.betas /= self.gamma  # Increase uncertainty for inactive arms
-        # print("what is this nonsense")
-        # print(self.lambda_ / self.arm_avail_probs)
 
         # Update parameters for active arm
         muscale = min(
             (1 - self.lambda_) / self.arm_avail_probs[arms_pulled],
             (1 - self.lambda_) * 5,
         )
-        # print(arms_pulled)
-        # print(muscale)
-        # print(muscale[arms_pulled])
-        # print(advantage)
 
+        # Make advantage shape match arms pulled
+        advantage = np.array(advantage)
+        if len(advantage.shape) == 0:
+            advantage = np.array([advantage])
+        if len(advantage) > 1:
+            advantage = advantage[arms_pulled]
+
+        # Update alphas and betas based on evidence
         prev_mu = self.mu[arms_pulled]
         self.mu[arms_pulled] = (1 - muscale) * prev_mu + muscale * advantage
         self.alphas[arms_pulled] += 0.5 / self.arm_avail_probs[arms_pulled]
-        if True:
-            self.betas[arms_pulled] += (
-                0.5 * (advantage - prev_mu) ** 2 / self.arm_avail_probs[arms_pulled]
-            )
-        else:
-            self.betas[arms_pulled] = (1 - muscale) * self.betas[
-                arms_pulled
-            ] + 0.5 * muscale * (advantage - prev_mu) ** 2
+        self.betas[arms_pulled] += (
+            0.5 * (advantage - prev_mu) ** 2 / self.arm_avail_probs[arms_pulled]
+        )
         self.ns[arms_pulled] += 1  # Increment only for pulled arm
-        # print("alphas betas after: ", self.alphas, self.betas)
-        # input()
 
     def dist_mode(self, prior=None):
         print(self.mu)
@@ -547,12 +535,14 @@ class MATCH:
         self.n_agents = n_agents
         self.commanded_by = np.zeros(n_agents)
         self.commanded_by[self.id] = 1
+        self.command_contents = np.zeros(n_agents)
         self.listen_to_duplicate = listen_to_duplicate
 
         # These two vars are memorized during action selection
         # so that they can be used during update.
         self.told_to = np.zeros(n_agents)
         self.n_options = 1
+        self.selected = 0
 
     def policy_with_oracle(self, commanded_by, told_to, prior=None):
         self.told_to = np.copy(told_to)
@@ -565,13 +555,16 @@ class MATCH:
 
         self.leaders = np.zeros(self.n_agents)
         self.leaders[leader] = 1
+        self.selected = leader
         if self.listen_to_duplicate:
             self.leaders[told_to == told_to[leader]] = 1
             # TODO for continuous actions, add an epsilon for similar actions
         chosen_action = told_to[leader]
         return chosen_action, leader
 
-    def update_listener(self, adv, verbose=0):  # adv is one number
+    def update_listener(self, adv, arms=None, verbose=0):  # adv is one number
+        if arms is None:
+            arms = self.leaders.astype(bool)
         self.listener.update(arms_pulled=self.leaders, advantage=adv)
 
     def choose_target(self, available_teammates, prior=None):
@@ -580,7 +573,7 @@ class MATCH:
         self.targets = self.speaker.choose(
             available_teammates=available_teammates, prior=prior
         )
-        return self.targets
+        return self.targets.copy()
 
     def update_speaker(
         self, adv, sampled=None, n_options=1, verbose=0
@@ -599,15 +592,114 @@ class MATCH:
         restr += "\nSpeaker stuff: " + str(self.speaker)
         return restr
 
+    def calc_reward(
+        self,
+        buffer: FlexibleBuffer,
+        agent: Agent,
+        idx=np.arange(start=1, stop=10, step=1),
+        adv_type="gae",
+        r_key="global_rewards",
+        s_key="obs",
+        sp_key="obs_",
+        t_key="terminated",
+        v_key=None,
+        legal_actions=False,
+        gamma=0.99,
+        gae_lambda=0.95,
+        k_step=5,
+        device="cuda",
+        share_listener_rewards=False,
+        suggested_actions=None,
+        n_same_actions_required=1,
+    ):
+        # rewards = buffer.__dict__[r_key][index_start:index_end]
+        # if v_key is None:
+        #     values = agent.expected_V(buffer.__dict__[s_key][self.id, :, :])
+        # else:
+        #     values = buffer.__dict__[values][self.id, index_start:index_end]
+        # terminated = buffer.__dict__[t_key]
+        samp = buffer.sample_transitions(idx=idx, as_torch=True, device=device)
 
-class GMATCH:
-    def __init__(n_agents):
-        return 0
+        # TODO validate this code with an agent
+        l_ac = None
+        l_ac_ = None
+        if legal_actions:
+            l_ac = []
+            l_ac_ = []
+            for j in range(len(buffer.action_mask_)):
+                l_ac.append(samp.action_mask[j][self.id])
+                l_ac_.append(samp.action_mask_[j][self.id, idx[-1], :])
 
+        if v_key is not None:
+            values = samp.__dict__[v_key][self.id]
+        else:
+            values = agent.expected_V(
+                samp.__dict__[s_key][self.id],
+                legal_action=l_ac,
+            )
+        last_value = agent.expected_V(
+            samp.__dict__[sp_key][self.id, -1],
+            legal_action=l_ac_,
+        )
+        adv = 0
+        if adv_type == "gae":
+            adv = FlexibleBuffer.GAE(
+                rewards=samp.__dict__[r_key],
+                values=values,
+                terminated=samp.terminated,
+                last_value=last_value,
+                gae_lambda=gae_lambda,
+                gamma=gamma,
+            )  # TODO add if statement for individual rewards
+        elif adv_type == "td":
+            adv = FlexibleBuffer.K_Step_TD(
+                rewards=samp.__dict__[r_key],
+                values=values,
+                terminated=samp.terminated,
+                last_value=last_value,
+                gamma=gamma,
+                k=k_step,
+            )
+        elif adv_type == "monte":
+            adv = FlexibleBuffer.G(
+                rewards=samp.__dict__[r_key],
+                terminated=samp.terminated,
+                last_value=last_value,
+                gamma=gamma,
+            )
+            adv = adv - values
+            print("adv_type not implemented")
+        elif (
+            adv_type == "ep_avg"
+        ):  # Take td for each episode with the first and last value and avg them
+            print("ep_avg not implemented")
+        elif (
+            adv_type == "truncate"
+        ):  # if a terminal state is reached, ignore the rest of the episodes
+            print("truncate not implemented")
+        else:
+            print("adv_type not recognized")
 
-class IMATCH:
-    def __init__(n_agents):
-        return 0
+        adv = adv.detach().cpu().numpy()
+        if share_listener_rewards:
+            if suggested_actions is None:
+                ValueError("suggested actions must be provided if sharing rewards")
+            same_actions = np.full((self.n_agents, len(idx)), False, dtype=bool)
+            for agent_id in range(self.n_agents):
+                same_actions[agent_id] = (
+                    suggested_actions[self.id] == suggested_actions[agent_id]
+                )
+            ad_holder = np.zeros(self.n_agents)
+            arms = np.zeros(self.n_agents)
+            arms[self.selected] = 1
+            for agent_id in range(self.n_agents):
+                if same_actions[agent_id].sum() >= n_same_actions_required:
+                    ad_holder[agent_id] = adv[same_actions[agent_id]].mean()
+                    arms[agent_id] = same_actions[agent_id].mean()
+            adv = ad_holder
+
+        # returns the advantage for the arms in general as one number, or for each arm pulled if suggested actions are the same
+        return adv, arms
 
 
 def symmetric_advantage(n_agents):
@@ -802,7 +894,7 @@ def test_match(n_agents, n_steps, n_trials, adv, verbose=False, skillvec=np.ones
             for listener in range(n_agents):
                 mtc = matches[listener]
                 mtc: MATCH
-                l = np.argmax(mtc.leaders)
+                l = mtc.selected
                 ad = np.random.normal(loc=adv[listener, l], scale=0.5)
                 if verbose:
                     print(

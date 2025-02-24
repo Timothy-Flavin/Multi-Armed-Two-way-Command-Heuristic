@@ -1,4 +1,4 @@
-from flexibuddiesrl import DQN, PG, TD3, DDPG, Agent
+from flexibuddiesrl import DQN, PG, Agent
 import argparse
 import os
 import numpy as np
@@ -16,30 +16,17 @@ from wrapped_environments import (
 )  # cartpole env for testing
 from enum import Enum
 from flexibuff import FlexibleBuffer, FlexiBatch
-from MABSamplers import Agent_With_Oracle
-
-
-class Episode_Type(Enum):
-    RAND = 0
-    RL = 1
-    HUMAN = 3
-    EVAL = 4
-    EGREEDY = 5  # RL discrete action but with some randomness added in
-
-
-keys_down = {}
-
-
-def handle_key_event(key_event):
-    if key_event.name not in keys_down:
-        keys_down[key_event.name] = True
-    else:
-        keys_down[key_event.name] = not keys_down[key_event.name]
-    # print(key_event.name)
+from MABTheory import MATCH
 
 
 GREED = True
 # keyboard.hook(handle_key_event)
+
+
+class Episode_Type(Enum):
+    RL = 1
+    EVAL = 4
+    MATCH_EVAL = 5
 
 
 # from wrapped_environments import CartpoleWrapped, MatrixGame
@@ -57,22 +44,9 @@ def handle_actions(
 ):
     action = 0
     lp = -1.0
-    # print(episode_type)
-    # print(f"obs: {obs}, avail actions: {avail_actions} \n\n\n")
-    if episode_type == Episode_Type.RAND:
-        action = np.random.choice(
-            a=np.arange(avail_actions.shape[0]),
-            p=avail_actions / np.sum(avail_actions),
-        )
-        # print(f"Rand action: {action}")
-    elif episode_type == Episode_Type.HUMAN:
-        human_renderer(obs, avail_actions, agent_id)
-        action = human_input_processor(obs, avail_actions, agent_id, keys_down)
-        print(f"Human action: {action}")
-    elif episode_type == Episode_Type.EVAL:
+
+    if episode_type == Episode_Type.EVAL:
         with torch.no_grad():
-            # action = model.deterministic_action(obs, avail_actions)
-            # action, lp, qold = model.train_actions(obs, avail_actions, step=True)
             discrete_actions, continuous_actions, dlp, clp, value = model.train_actions(
                 obs, avail_actions, step=True
             )
@@ -82,19 +56,8 @@ def handle_actions(
                 lp = dlp
             else:
                 lp = dlp[0]
-            # print(f"Model action: {action}")
-    elif episode_type == Episode_Type.EGREEDY:
-        if np.random.random() < epsilon:
-            action = np.random.choice(
-                a=np.arange(avail_actions.shape[0]),
-                p=avail_actions / np.sum(avail_actions),
-            )  # env.action_space.sample()#model.get_action(obs, avail_actions)
-            # print(f"E Greedy Rand action: {action}")
-        else:
-            action = model.ego_actions(obs, avail_actions)
-            # print(f"E Greedy model action: {action}")
+
     elif episode_type == Episode_Type.RL:
-        # action, lp, qold
         discrete_actions, continuous_actions, dlp, clp, value = model.train_actions(
             obs, avail_actions, step=True
         )
@@ -103,189 +66,158 @@ def handle_actions(
             lp = dlp  # For non policy gradient methods that return zero
         else:
             lp = dlp[0]
-        # print(obs)
-        # print(action)
-        # print(f"RL schochastic action: {action}")
-    # print(action, lp)
     return int(action), lp
 
 
-def check_discrete_human_likeness(model: Agent, m_batches: list, agent_id=0):
-    # print(model.hum_mem_buff.steps_recorded)
-
-    n_right = 0
-    n_total = 0
-    batch: FlexiBatch
-    for batch in m_batches:
-        mask = None
-        if batch.action_mask is not None:
-            mask = batch.action_mask[0][
-                agent_id
-            ]  # gets action mask for discrete output 0 and this agent
-        model_ac = model.ego_actions(
-            observations=batch.obs[agent_id], legal_actions=mask
-        )
-        n_total += batch.discrete_actions.shape[1]
-
-        n_right += np.sum(
-            model_ac == batch.discrete_actions[agent_id, :, 0].cpu().numpy()
-        ).item()
-    return n_right / n_total
-
-
 def actions_match(
-    memory,
-    models,
-    episode_type,
-    epsilon,
+    memory: FlexibleBuffer,
+    models: list[Agent],
     obs,
     n_agents,
     n_actions,
     env: Wrapper,
-    MATCH: list[Agent_With_Oracle],
+    match_modules: list[MATCH],
     n_steps=1,
     current_step=0,
     device="cuda:0",
     verbose=False,
+    gamma=0.99,
+    priors=[None, None],
+    share_listener_rewards: bool = False,
+    n_same_actions_required: int = 1,
 ):
-    if verbose:
-        print("\n\n\nBefore Everything: ")
-        print(MATCH[0])
-        print(MATCH[1])
-    if not torch.is_tensor(obs):
-        obs = torch.from_numpy(obs).float().to(device)
-
-    actions = np.zeros(shape=n_agents, dtype=np.int64)
-    la = np.ones(shape=(n_agents, n_actions))
-    for agent_id in range(n_agents):
-        avail = env.get_avail_agent_actions(agent_id)
-        avail_actions = np.array(avail) if avail is not None else None
-        if avail_actions is not None:
-            la[agent_id] = avail_actions
-
-    # print(f"legal_actions: {la}")
-    # update listener / incoming MAB from last step
-    if current_step != 0 and current_step % n_steps == 0:
+    with torch.no_grad():
         if verbose:
-            print(
-                f"Current step {current_step} not zero and % nsteps ({n_steps}) is zero so updating value"
-            )
+            print("\n\n\nBefore Everything: ")
+            print(match_modules[0])
+            print(match_modules[1])
+        if not torch.is_tensor(obs):
+            obs = torch.from_numpy(obs).float().to(device)
+
+        command_targets = np.zeros((n_agents, n_agents))
+        command_contents = np.zeros((n_agents, n_agents))
+        actions = np.zeros(shape=n_agents, dtype=np.int64)
+        la = np.ones(shape=(n_agents, n_actions))
         for agent_id in range(n_agents):
-            disc = 1.0
-            target = 0
-            for r in reversed(MATCH[agent_id].reward):
-                target *= MATCH[agent_id].gamma  #
-                disc *= MATCH[agent_id].gamma
-                target += r
-            if verbose:
-                print(
-                    f"aid{agent_id} rewards: {MATCH[agent_id].reward} discounted to {target}"
-                )
-            ev = MATCH[agent_id].agent.expected_V(obs[agent_id], la[agent_id])
-            target += disc * ev
-            if verbose:
-                print(f"ev: {ev}, discounted: {ev*disc}")
-                print(
-                    f"target + disc ev: {target} where previous value: {MATCH[agent_id].value} for listening to {MATCH[agent_id].leader}"
-                )
-            if torch.is_tensor(target):
-                target = target.cpu().item()
-            value = MATCH[agent_id].value
-            if torch.is_tensor(value):
-                value = value.cpu().item()
-            MATCH[agent_id].update_listener(target - value)
-            MATCH[agent_id].reward = []
-            MATCH[agent_id].value = 0
+            avail = env.get_avail_agent_actions(agent_id)
+            if avail is not None:
+                la[agent_id] = np.array(avail)
         if verbose:
-            print("\nAfter Listener Update: ")
-            print(MATCH[0])
-            print(MATCH[1])
+            print(f"la: {la}")
 
-    if verbose:
-        print("\nDoing this episode's commands now")
-    command_recipients = np.zeros(
-        (n_agents, n_agents)
-    )  # agents command themselves always
-    command_contents = np.zeros(
-        (n_agents, n_agents)
-    )  # later will be 3d for actions with more than 1 number
-    for agent_id in range(n_agents):
-        # Only choose targets if this is an update round
-        if current_step % n_steps == 0:
-            if agent_id == 0 and GREED:
-                target = MATCH[agent_id].choose_target(
-                    np.array([0, 100]), np.ones(n_agents)
-                )  # agents are always alive here
-            else:
-                target = MATCH[agent_id].choose_target(
-                    None, np.ones(n_agents)
-                )  # agents are always alive here
-        else:
-            target = MATCH[agent_id].target
-
-        if verbose:
-            print(f"aid: {agent_id} chose: {target} to command")
-
-        command_recipients[target, agent_id] = 1
-        act, _, lp, __, qv = MATCH[agent_id].agent.train_actions(
-            obs[target], la[target]
-        )
-        command_contents[target, agent_id] = act
-        if target != agent_id:  # action commanded to itself if it didnt just
-            act, _, lp, __, qv = MATCH[agent_id].agent.train_actions(
-                obs[agent_id], la[agent_id]
-            )
-            command_contents[agent_id, agent_id] = act
-    if verbose:
-        print(f"Command matrix: {command_recipients}")
-    # Record expected values before commands, take actions, and update outgoing MABs
-    for agent_id in range(n_agents):
-        if current_step % n_steps == 0:  # only set my value on an update step
-            MATCH[agent_id].record_value(
-                MATCH[agent_id].agent.expected_V(
-                    obs=obs[agent_id], legal_action=la[agent_id]
-                )
-            )
-            if agent_id == 0:
-                action, commander = MATCH[agent_id].policy_with_oracle(
-                    command_recipients[agent_id] * int(not GREED),
-                    command_contents[agent_id],
-                )
-            else:
-                action, commander = MATCH[agent_id].policy_with_oracle(
-                    command_recipients[agent_id], command_contents[agent_id]
-                )
+        # Update the match modules with the last n_steps of memory if this is a match update step
+        if current_step != 0 and current_step % n_steps == 0:
+            speaker_adv = np.zeros((n_agents, n_agents))
+            for agent_id in range(n_agents):
+                command_targets[agent_id] = match_modules[agent_id].targets
             if verbose:
-                print(
-                    f"aid: {agent_id} took action from commander: {commander} updating commanders based on who listened"
+                print(f"Updating MATCH from Command matrix: {command_targets}")
+            idx = np.arange(memory.idx - n_steps, memory.idx)
+            for ix in range(idx.shape[0]):
+                if idx[ix] < 0:
+                    idx[ix] += memory.mem_size
+            if verbose:
+                print(f"idx: {idx}")
+            for agent_id in range(n_agents):
+                # Get the steps that we have recorded since last match update
+                adv, arms = match_modules[agent_id].calc_reward(
+                    buffer=memory,
+                    agent=models[agent_id],
+                    idx=idx,
+                    agent=models[agent_id],
+                    adv_type="gae",
+                    legal_actions=True,
+                    device=device,
+                    gamma=gamma,
+                    share_listener_rewards=share_listener_rewards,
+                    n_same_actions_required=n_same_actions_required,
                 )
-            # if agent_id != commander:
-            # print(f"aid != commander so update commander's listener well")
-            if command_recipients[agent_id, commander] > 0:
+                if share_listener_rewards:
+                    arm_bool = arms > 0
+                else:
+                    arm_bool = arms == np.max(
+                        arms
+                    )  # maybe replace this with armbool[selected]=True
+                match_modules[agent_id].update_listener(
+                    adv=adv, arms=arm_bool, verbose=verbose
+                )
+                speaker_adv[:, agent_id] = arms
                 if verbose:
                     print(
-                        f"updating agent[{commander}]'s speaker [{agent_id}] positively"
+                        f"  a_id: \n  {agent_id}\n  adv: \n  {adv},\n arms: \n  {arms}\n  speaker adv: \n  {speaker_adv[:, agent_id]}"
                     )
-                MATCH[commander].update_oracle(
-                    adv=1, sampled=agent_id, verbose=int(verbose)
+            augmented_targets = command_targets.copy()
+            for agent_id in range(n_agents):
+                augmented_targets[agent_id, agent_id] = 1
+            for agent_id in range(n_agents):
+                match_modules[agent_id].update_speaker(
+                    adv=speaker_adv[agent_id],
+                    verbose=verbose,
+                    n_options=augmented_targets.sum(axis=0).flatten() - 1,
                 )
-            for commander_id in range(n_agents):
-                if (  # If this commander_id sent a command but it is not the one that got followed
-                    command_recipients[agent_id, commander_id] > 0
-                    and commander_id != commander
-                ):
-                    if verbose:
-                        print(
-                            f"updating agent[{commander_id}]'s speaker [{agent_id}] negatively"
+
+        # Set up the command matrix from scratch if this is a command step
+        if current_step % n_steps == 0:
+            if verbose:
+                print("\nUpdating content and targets because it's an update episode")
+            # later will be 3d for actions with more than 1 number
+            for agent_id in range(n_agents):
+                # Get the command targets from each agent 'agent_id'
+                command_targets[agent_id] = match_modules[agent_id].choose_target(
+                    prior=priors[agent_id], available_teammates=np.ones(n_agents)
+                )
+
+                # Get the command contents for each agent
+                for target in range(n_agents):
+                    if target == agent_id or command_targets[agent_id, target] > 0:
+                        act, _, lp, __, qv = models[agent_id].train_actions(
+                            obs[target], la[target]
                         )
-                    MATCH[commander_id].update_oracle(
-                        adv=-1, sampled=agent_id, verbose=int(verbose)
-                    )  # if this is someone else's command and we didn't listen -1
-        else:  # Keep listening to the same one if this is not an update step
-            action = command_contents[agent_id, MATCH[agent_id].leader]
-        actions[agent_id] = action
-    if verbose:
-        input()
+                        command_contents[agent_id, target] = act[
+                            0
+                        ]  # TODO: act is a tensor for multi output domains
+
+            for agent_id in range(n_agents):
+                match_modules[agent_id].command_contents = command_contents[agent_id]
+
+        # If it is not an update turn, just use the last command targets but current command contents
+        else:
+            if verbose:
+                print("\nUpdating command content but not targets")
+            for agent_id in range(n_agents):
+                command_targets[agent_id] = match_modules[agent_id].targets
+                for target in range(n_agents):
+                    if target == agent_id or command_targets[agent_id, target] > 0:
+                        act, _, lp, __, qv = models[agent_id].train_actions(
+                            obs[target], la[target]
+                        )
+                        command_contents[agent_id, target] = act[0]
+        if verbose:
+            print(f"command_targets: {command_targets}")
+            print(f"command_contents: {command_contents}")
+
+        # choose who to listen to and update oracles from last time?
+        for agent_id in range(n_agents):
+            if current_step % n_steps == 0:  # only set my value on an update step
+                options = command_targets[:, agent_id].copy().flatten()
+                action, leader = match_modules[agent_id].policy_with_oracle(
+                    commanded_by=options,
+                    prior=None,
+                    told_to=command_contents[:, agent_id].copy().flatten(),
+                )
+                if verbose:
+                    print(
+                        f"a: {agent_id}, chosing new action {action} from: {options}, leader: {match_modules[agent_id].selected}"
+                    )
+            else:  # Keep listening to the same one if this is not an update step
+                action = command_contents[match_modules[agent_id].selected, agent_id]
+                if verbose:
+                    print(
+                        f"not updating, listening to [{action}] from the same one as last time: {match_modules[agent_id].selected}"
+                    )
+            actions[agent_id] = action
+        if verbose:
+            input()
     return actions, la, 0
 
 
@@ -338,17 +270,18 @@ def run_multi_agent_episodes(
     epsilon=0.1,  # For Egreedy episodes
     supervised_reg=False,  # If true, will learn supervised objective as well
     expert_reward=False,
-    central_mixer=None,
     episodic=False,
     learn_during_rand=False,
     display=False,
     graph_progress=False,
     reward_checkpoint_bin=[10, 40, 60, 70, 80, 100],  #   #
     model_path="",
-    MATCH=None,
+    use_match=False,
     n_shot=1,
     n_step=5,
     online=False,
+    verbose=False,
+    save_models=False,
 ):
     print(
         f"Running {episode_type} episodes online: {online}, episodic: {episodic} ms:{max_steps}"
@@ -366,12 +299,6 @@ def run_multi_agent_episodes(
     human_likeness = []
     loss_hist = []
 
-    quit_early = False
-    if episode_type == Episode_Type.HUMAN:  # RAND, EVAL, HUMAN, EGREEDY
-        quit_early = (
-            input("Would you like to record a human episode? (y,n)").lower() == "n"
-        )
-
     while overall_step < max_steps and not quit_early:
         # print(
         #    f"overall: {overall_step} ep# {current_episode}"
@@ -388,56 +315,36 @@ def run_multi_agent_episodes(
         current_episode_step = 0
 
         if current_episode % n_shot == 0:
-            # print("Resetting match samplers")
-            MATCH_Wrappers = [
-                Agent_With_Oracle(
-                    agent=models[0], n_agents=n_agents, oracle_num=0, sampler="Thompson"
-                ),
-                Agent_With_Oracle(
-                    agent=models[1], n_agents=n_agents, oracle_num=1, sampler="Thompson"
-                ),
-            ]
-        # if current_episode % n_shot == (n_shot - 1):
-        # for aid in range(n_agents):
-        # MATCH_Wrappers[aid].greed()
+            matches = (
+                [  # TODO: Make match have a reset function instead of making new ones
+                    MATCH(n_agents, i, single=False, lambda_=0.90, gamma=0.90)
+                    for i in range(n_agents)
+                ]
+            )
 
         while not done:
             actions, la = None, None
-            if MATCH is None:
-                actions, la, log_probs = actions_no_match(
-                    memory,
-                    models,
-                    episode_type,
-                    epsilon,
-                    obs,
-                    n_agents,
-                    n_actions,
-                    env,
-                )
-            else:
-                actions, la, log_probs = actions_match(
-                    memory,
-                    models,
-                    episode_type,
-                    epsilon,
-                    obs,
-                    n_agents,
-                    n_actions,
-                    env,
-                    MATCH_Wrappers,
-                    n_steps=n_step,
-                    current_step=current_episode_step,
-                    device=device,
-                )
+
+            actions, la, log_probs = actions_match(
+                memory=memory,
+                models=models,
+                obs=obs,
+                n_agents=n_agents,
+                n_actions=n_actions,
+                env=env,
+                match_modules=matches,
+                n_steps=n_step,
+                current_step=current_episode_step,
+                device=device,
+                verbose=verbose,
+                share_listener_rewards=False,
+                n_same_actions_required=1,
+            )
             # input()
             if display:
                 env.display(obs, None, 0)
 
             obs_, reward, terminated, truncated, info = env.step(actions)
-
-            if MATCH is not None:
-                for aid in range(n_agents):
-                    MATCH_Wrappers[aid].record_reward(reward)
 
             # env.display(obs, avail_actions, agent_id)
             ep_reward_hist[current_episode] += reward
@@ -452,20 +359,18 @@ def run_multi_agent_episodes(
             # print(actions)
             # print(env.env)
 
-            if episode_type != Episode_Type.EVAL:
-
-                memory.save_transition(
-                    terminated=terminated,
-                    action_mask=[la],  # list for action dims
-                    registered_vals={
-                        "obs": obs,
-                        "obs_": obs_,
-                        "discrete_actions": actions,
-                        "global_rewards": reward,
-                        "global_auxiliary_rewards": er,
-                        "discrete_log_probs": log_probs,
-                    },
-                )
+            memory.save_transition(
+                terminated=terminated,
+                action_mask=[la],  # list for action dims
+                registered_vals={
+                    "obs": obs,
+                    "obs_": obs_,
+                    "discrete_actions": actions,
+                    "global_rewards": reward,
+                    "global_auxiliary_rewards": er,
+                    "discrete_log_probs": log_probs,
+                },
+            )
 
             if episode_type == Episode_Type.RL:
                 inds = np.arange(n_agents)
@@ -492,45 +397,11 @@ def run_multi_agent_episodes(
                         )
                     loss_hist[-1] += closs
 
-                if supervised_reg:  # TODO: make sample in order for rnn
-                    exp = imitation_memory.sample_transitions(
-                        256, as_torch=True, device=device
-                    )
-                    # print(exp)
-                    models[agent_id].imitation_learn(
-                        exp.obs[agent_id], exp.discrete_actions[agent_id]
-                    )
-
-            if episode_type == Episode_Type.RAND:
-                print("yeehaw")
-                if learn_during_rand:
-                    for agent_id in range(n_agents):
-                        exp = memory.sample_episodes(256, as_torch=True, device=device)
-                        for e in exp:
-                            models[agent_id].reinforcement_learn(
-                                e, agent_id, critic_only=True
-                            )
             overall_step += 1
             current_episode_step += 1
-            # print(obs)
-            # print(obs_)
             obs = obs_
 
-        hl = np.zeros(n_agents)
-        if episode_type != Episode_Type.EVAL:
-            if imitation_memory is not None and imitation_memory.steps_recorded > 100:
-                for hi in range(n_agents):
-                    if memory.steps_recorded < 256:
-                        break
-                    f_batches = imitation_memory.sample_episodes(
-                        max_batch_size=256, as_torch=True, device=device
-                    )
-                    hl[hi] = check_discrete_human_likeness(
-                        models[agent_id], f_batches, hi
-                    )
-
         # if current_episode % n_shot == (n_shot - 1):
-        human_likeness.append(hl)
         recent_rewards.append(ep_reward_hist[-1])
         recent_expert_rewards.append(ep_expert_reward_hist[-1])
 
@@ -559,7 +430,11 @@ def run_multi_agent_episodes(
                 f"Return: {ep_reward_hist[current_episode]:<5.1f} smooth: {smooth_reward_hist[-1]}"
             )
 
-        if episode_type == Episode_Type.RL and len(reward_checkpoint_bin) > 0:
+        if (
+            save_models
+            and episode_type == Episode_Type.RL
+            and len(reward_checkpoint_bin) > 0
+        ):
             mbin = min(reward_checkpoint_bin)
             # print(smooth_reward_hist[-1])
             # print(mbin)
@@ -573,46 +448,6 @@ def run_multi_agent_episodes(
                 )
                 reward_checkpoint_bin.pop(reward_checkpoint_bin.index(mbin))
 
-        if episode_type == Episode_Type.RL and overall_step >= max_steps:
-            models[agent_id].save(
-                model_path
-                + f"r_{smooth_reward_hist[-1]}_supreg{supervised_reg}_{agent_id}/"
-            )
-
-        if episode_type == Episode_Type.HUMAN:
-            save = input("Save episode? ") == "y"
-            if save:
-                print("saved to drive")
-                # print(memory)
-                FlexibleBuffer.save(memory)
-                idx_before = memory.idx
-                steps_recorded_before = memory.steps_recorded
-                ep_inds = memory.episode_inds
-                ep_lens = memory.episode_lens
-            else:
-                memory.idx = idx_before
-                memory.steps_recorded = steps_recorded_before
-                memory.episode_inds = ep_inds
-                memory.episode_lens = ep_lens
-            quit_early = input("Another episode?").lower() == "n"
-
-        if episode_type == Episode_Type.RAND:
-            if recent_rewards[-1] > 0.1:
-                print("good episode, saving")
-                idx_before = memory.idx
-                steps_recorded_before = memory.steps_recorded
-                ep_inds = memory.episode_inds
-                ep_lens = memory.episode_lens
-            else:
-                print("bad episode, not saving")
-                # overall_step = overall_before
-                # memory.idx = idx_before
-                # memory.steps_recorded = steps_recorded_before
-                # memory.episode_inds = ep_inds
-                # memory.episode_lens = ep_lens
-        # print(
-        #    f"ce: {current_episode}, {current_episode % 50 == 0} and {current_episode > 1} and {graph_progress}"
-        # )
         if current_episode % 500 == 0 and current_episode > 1 and graph_progress:
             smr = np.array(smooth_reward_hist)
             smer = np.array(smooth_expert_reward_hist)
@@ -659,54 +494,12 @@ def run_multi_agent_episodes(
         # print("Samplers summary: ")
         # for aid in range(n_agents):
         #    MATCH_Wrappers[aid].final_dir(prior=None)
-    if (
-        episode_type == Episode_Type.RL
-        or episode_type == Episode_Type.RAND
-        or episode_type == Episode_Type.EGREEDY
-        or episode_type == Episode_Type.EVAL
-    ):
+    if episode_type == Episode_Type.RL or episode_type == Episode_Type.EVAL:
         return (
             np.array(smooth_reward_hist),
             np.array(smooth_expert_reward_hist),
             np.array(human_likeness),
         )
-
-
-def offline_update(models: list[Agent], n, memory: FlexibleBuffer, verbose=False):
-    print(memory)
-    if memory.steps_recorded < 10:
-        return [0], [0], [0]
-    critic_loss = []
-    actor_loss = []
-    hlike = []
-    for i in range(n):
-        batches = memory.sample_episodes(
-            max_batch_size=400, as_torch=True, device=device
-        )
-        b: FlexiBatch
-        for b in batches:
-            # print(b.terminated)
-            for ag in range(n_agents):
-                aloss, closs = models[ag].reinforcement_learn(b, ag, True)
-                critic_loss.append(closs)
-                actor_loss.append(
-                    models[ag].imitation_learn(b.obs[ag], b.discrete_actions[ag])
-                )
-            for id in range(n_agents):
-                hlike.append(check_discrete_human_likeness(models[ag], batches, id))
-
-    if True:
-        # for h in hlike:
-        # h2.append(h.mean())
-        critic_loss = np.array(critic_loss)
-        crmax = np.max(critic_loss)
-        plt.plot(critic_loss / crmax)
-        plt.plot(actor_loss)
-        plt.plot(hlike)
-        plt.legend([f"Critic Loss {crmax}", "Actor Imitation loss", "Human Likeness"])
-        plt.show()
-
-    return critic_loss, actor_loss, hlike
 
 
 def get_agent(obs, args, device, n_actions):
