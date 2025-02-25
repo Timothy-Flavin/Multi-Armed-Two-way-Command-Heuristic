@@ -1,3 +1,6 @@
 __pycache__
 PaperExperiment
 *.npy
+./.vscode
+launch.json
+./.vscode/launch.json

@@ -643,23 +643,27 @@ class MATCH:
         )
         adv = 0
         if adv_type == "gae":
-            adv = FlexibleBuffer.GAE(
+            G, adv = FlexibleBuffer.GAE(
                 rewards=samp.__dict__[r_key],
-                values=values,
+                values=values.flatten(),
                 terminated=samp.terminated,
                 last_value=last_value,
                 gae_lambda=gae_lambda,
                 gamma=gamma,
             )  # TODO add if statement for individual rewards
+            print("gae adv: ", adv)
+
         elif adv_type == "td":
-            adv = FlexibleBuffer.K_Step_TD(
+            G, adv = FlexibleBuffer.K_Step_TD(
                 rewards=samp.__dict__[r_key],
-                values=values,
+                values=values.flatten(),
                 terminated=samp.terminated,
                 last_value=last_value,
                 gamma=gamma,
                 k=k_step,
             )
+            print("kstep adv: ", adv)
+
         elif adv_type == "monte":
             adv = FlexibleBuffer.G(
                 rewards=samp.__dict__[r_key],
@@ -667,20 +671,14 @@ class MATCH:
                 last_value=last_value,
                 gamma=gamma,
             )
+            print("monte adv: ", adv)
             adv = adv - values
-            print("adv_type not implemented")
-        elif (
-            adv_type == "ep_avg"
-        ):  # Take td for each episode with the first and last value and avg them
-            print("ep_avg not implemented")
-        elif (
-            adv_type == "truncate"
-        ):  # if a terminal state is reached, ignore the rest of the episodes
-            print("truncate not implemented")
         else:
             print("adv_type not recognized")
 
         adv = adv.detach().cpu().numpy()
+        arms = np.zeros(self.n_agents)
+        arms[self.selected] = 1
         if share_listener_rewards:
             if suggested_actions is None:
                 ValueError("suggested actions must be provided if sharing rewards")
@@ -690,8 +688,7 @@ class MATCH:
                     suggested_actions[self.id] == suggested_actions[agent_id]
                 )
             ad_holder = np.zeros(self.n_agents)
-            arms = np.zeros(self.n_agents)
-            arms[self.selected] = 1
+
             for agent_id in range(self.n_agents):
                 if same_actions[agent_id].sum() >= n_same_actions_required:
                     ad_holder[agent_id] = adv[same_actions[agent_id]].mean()
@@ -952,13 +949,146 @@ if __name__ == "__main__":
     # imatches = [IMATCH(n_agents, i) for i in range(n_agents)]
 
     adv, skillvec = skill_advantage(n_agents)
-    test_match(
-        n_agents=n_agents,
-        n_steps=n_steps,
-        n_trials=n_trials,
-        adv=adv,
-        verbose=False,
-        skillvec=skillvec,
+
+    # test_match(
+    #    n_agents=n_agents,
+    #    n_steps=n_steps,
+    #    n_trials=n_trials,
+    #    adv=adv,
+    #    verbose=False,
+    #    skillvec=skillvec,
+    # )
+
+    mem = FlexibleBuffer(
+        num_steps=10,
+        n_agents=5,
+        discrete_action_cardinalities=[5],
+        global_registered_vars={
+            "global_rewards": (None, np.float32),
+        },
+        individual_registered_vars={
+            "obs": ([3], np.float32),
+            "obs_": ([3], np.float32),
+            "values": ([1], np.float32),
+        },
+    )
+    mem.save_transition(
+        terminated=False,
+        registered_vals={
+            "global_rewards": 1,
+            "values": np.ones((5, 1)),
+            "obs": np.ones((5, 3)),
+            "obs_": np.ones((5, 3)) + 0.1,
+        },
+    )
+    mem.save_transition(
+        terminated=False,
+        registered_vals={
+            "global_rewards": 1,
+            "values": np.ones((5, 1)) + 0.1,
+            "obs": np.ones((5, 3)) + 1,
+            "obs_": np.ones((5, 3)) + 1.1,
+        },
+    )
+    mem.save_transition(
+        terminated=True,
+        registered_vals={
+            "global_rewards": 1,
+            "values": np.ones((5, 1)) + 0.2,
+            "obs": np.ones((5, 3)) + 2,
+            "obs_": np.ones((5, 3)) + 2.1,
+        },
+    )
+    mem.save_transition(
+        terminated=False,
+        registered_vals={
+            "global_rewards": 1.1,
+            "values": np.ones((5, 1)) + 0.3,
+            "obs": np.ones((5, 3)) + 3,
+            "obs_": np.ones((5, 3)) + 3.1,
+        },
+    )
+    mem.save_transition(
+        terminated=False,
+        registered_vals={
+            "global_rewards": 1.1,
+            "values": np.ones((5, 1)) + 0.4,
+            "obs": np.ones((5, 3)) + 4,
+            "obs_": np.ones((5, 3)) + 4.1,
+        },
+    )
+    mem.save_transition(
+        terminated=False,
+        registered_vals={
+            "global_rewards": 1.1,
+            "values": np.ones((5, 1)) + 0.5,
+            "obs": np.ones((5, 3)) + 5,
+            "obs_": np.ones((5, 3)) + 5.1,
+        },
+    )
+
+    class Dummy(Agent):
+        def __init__(self, n_agents, id=0):
+            self.id = id
+            self.n_agents = n_agents
+
+        def train_actions(self, observations, action_mask=None, step=False):
+            return self.id, self.id, 0, 0, 0  # Action 0, log_prob 0, value
+
+        def ego_actions(self, observations, action_mask=None):
+            return 0
+
+        def imitation_learn(self, observations, actions):
+            return 0  # loss
+
+        def utility_function(self, observations, actions=None):
+            return 0  # Returns the single-agent critic for a single action.
+            # If actions are none then V(s)
+
+        def expected_V(self, obs, legal_action):
+            return 3.14159
+
+        def reinforcement_learn(
+            self, batch, agent_num=0, critic_only=False, debug=False
+        ):
+            return 0, 0  # actor loss, critic loss
+
+        def save(self, checkpoint_path):
+            print("Save not implemeted")
+
+        def load(self, checkpoint_path):
+            print("Load not implemented")
+
+    ma = MATCH(n_agents, 0, single=False, lambda_=0.90, gamma=0.90)
+    print(f"Testing match value calculation")
+    print(mem)
+    print(
+        ma.calc_reward(
+            mem,
+            adv_type="monte",
+            agent=Dummy(n_agents),
+            idx=np.arange(0, 6),
+            v_key="values",
+        )[0]
+    )
+    print(
+        ma.calc_reward(
+            mem,
+            adv_type="td",
+            agent=Dummy(n_agents),
+            idx=np.arange(0, 6),
+            v_key="values",
+            k_step=5,
+        )[0]
+    )
+    print(
+        ma.calc_reward(
+            mem,
+            adv_type="gae",
+            agent=Dummy(n_agents),
+            idx=np.arange(0, 6),
+            v_key="values",
+        )[0]
     )
 
 # [[ 0.          1.98644892  2.82382293  1.67797208  3.96014136]

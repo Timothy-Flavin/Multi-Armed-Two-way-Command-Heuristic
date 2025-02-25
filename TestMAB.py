@@ -299,7 +299,7 @@ def run_multi_agent_episodes(
     human_likeness = []
     loss_hist = []
 
-    while overall_step < max_steps and not quit_early:
+    while overall_step < max_steps:
         # print(
         #    f"overall: {overall_step} ep# {current_episode}"
         # )  # ep step: {current_episode_step}")
@@ -852,7 +852,7 @@ if __name__ == "__main__":
                 env=env,
                 models=[a1, a2],
                 n_agents=2,
-                episode_type=Episode_Type.EVAL,
+                episode_type=Episode_Type.RL,
                 memory=mem,
                 imitation_memory=mem,
                 max_steps=(
@@ -862,6 +862,9 @@ if __name__ == "__main__":
                 MATCH=True,
                 n_shot=int(args.n_shot),
                 n_step=int(args.n_step),
+                save_models=False,
+                online=True,
+                episodic=False,
             )
             rew = np.array(rew)
             mean_scores[i, j] = rew.mean()
@@ -887,7 +890,7 @@ if __name__ == "__main__":
         plt.title("Scores of different paired agents")
         plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
         plt.show()
-
+    exit()
     if args.env == "cartpole":
         dirpath = "./PaperExperiment/Cartpole/"
     elif args.env == "overcooked":
