@@ -888,7 +888,7 @@ if __name__ == "__main__":
             a1.eval_mode = True
             print(f"\n\nloading {model_dirs[j]}")
             a2: Agent = the_agents2[algos[j]]
-            a2.load(model_dirs[i] + "/")
+            a2.load(model_dirs[j] + "/")
             a2.eval_mode = True
 
             rew, er, hl = run_multi_agent_episodes(
@@ -907,7 +907,7 @@ if __name__ == "__main__":
                 save_models=False,
                 online=True,
                 episodic=False,
-                use_match=False,
+                use_match=True,
                 match_adv_type="gae",
             )
             nshot = int(args.n_shot)
