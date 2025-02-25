@@ -731,9 +731,9 @@ def organize_models(args):
     model_dirs = []
     graph_names = []
     algos = []
-    # print(res_paths)
-    # print(dir_lists)
-    # input("hmm")
+    print(res_paths)
+    print(dir_lists)
+    input("hmm")
     for i, rp in enumerate(res_paths):
         for d in dir_lists[i]:
             # if d[-1] != "0":
