@@ -85,10 +85,12 @@ def actions_match(
     priors=[None, None],
     share_listener_rewards: bool = False,
     n_same_actions_required: int = 1,
+    advantage_type="gae",
+    gae_lambda=0.98,
 ):
     with torch.no_grad():
         if verbose:
-            print("\n\n\nBefore Everything: ")
+            print(f"\n\n\nBefore Everything: {current_step}")
             print(match_modules[0])
             print(match_modules[1])
         if not torch.is_tensor(obs):
@@ -107,6 +109,7 @@ def actions_match(
 
         # Update the match modules with the last n_steps of memory if this is a match update step
         if current_step != 0 and current_step % n_steps == 0:
+            # print("updating matches")
             speaker_adv = np.zeros((n_agents, n_agents))
             for agent_id in range(n_agents):
                 command_targets[agent_id] = match_modules[agent_id].targets
@@ -124,13 +127,13 @@ def actions_match(
                     buffer=memory,
                     agent=models[agent_id],
                     idx=idx,
-                    agent=models[agent_id],
-                    adv_type="gae",
-                    legal_actions=True,
+                    adv_type=advantage_type,
+                    legal_actions=None,
                     device=device,
                     gamma=gamma,
                     share_listener_rewards=share_listener_rewards,
                     n_same_actions_required=n_same_actions_required,
+                    gae_lambda=gae_lambda,
                 )
                 if share_listener_rewards:
                     arm_bool = arms > 0
@@ -138,6 +141,7 @@ def actions_match(
                     arm_bool = arms == np.max(
                         arms
                     )  # maybe replace this with armbool[selected]=True
+
                 match_modules[agent_id].update_listener(
                     adv=adv, arms=arm_bool, verbose=verbose
                 )
@@ -149,11 +153,14 @@ def actions_match(
             augmented_targets = command_targets.copy()
             for agent_id in range(n_agents):
                 augmented_targets[agent_id, agent_id] = 1
+                if verbose:
+                    print("noptions: ")
+                    print(augmented_targets.sum(axis=0).flatten())
             for agent_id in range(n_agents):
                 match_modules[agent_id].update_speaker(
                     adv=speaker_adv[agent_id],
                     verbose=verbose,
-                    n_options=augmented_targets.sum(axis=0).flatten() - 1,
+                    n_options=augmented_targets.sum(axis=0).flatten(),
                 )
 
         # Set up the command matrix from scratch if this is a command step
@@ -282,14 +289,20 @@ def run_multi_agent_episodes(
     online=False,
     verbose=False,
     save_models=False,
+    match_lambda=0.9,
+    match_gamma=0.9,
+    gae_lambda=0.90,
+    match_adv_type="gae",
 ):
     print(
         f"Running {episode_type} episodes online: {online}, episodic: {episodic} ms:{max_steps}"
     )
     # input()
+    matches = None
     current_episode = 0
     current_episode_step = 0
     overall_step = 0
+    current_command_step = 0
     ep_reward_hist = []
     smooth_reward_hist = []
     ep_expert_reward_hist = []
@@ -313,33 +326,59 @@ def run_multi_agent_episodes(
         ep_expert_reward_hist.append(0)
         loss_hist.append(0)
         current_episode_step = 0
-
         if current_episode % n_shot == 0:
+            if matches is not None and verbose:
+                for m in matches:
+                    print(m)
             matches = (
                 [  # TODO: Make match have a reset function instead of making new ones
-                    MATCH(n_agents, i, single=False, lambda_=0.90, gamma=0.90)
+                    MATCH(
+                        n_agents,
+                        i,
+                        single=True,
+                        lambda_=match_lambda,
+                        gamma=match_gamma,
+                    )
                     for i in range(n_agents)
                 ]
             )
+            current_command_step = 0
+            # print("matches reset")
 
         while not done:
             actions, la = None, None
 
-            actions, la, log_probs = actions_match(
-                memory=memory,
-                models=models,
-                obs=obs,
-                n_agents=n_agents,
-                n_actions=n_actions,
-                env=env,
-                match_modules=matches,
-                n_steps=n_step,
-                current_step=current_episode_step,
-                device=device,
-                verbose=verbose,
-                share_listener_rewards=False,
-                n_same_actions_required=1,
-            )
+            if use_match:
+                actions, la, log_probs = actions_match(
+                    memory=memory,
+                    models=models,
+                    obs=obs,
+                    n_agents=n_agents,
+                    n_actions=n_actions,
+                    env=env,
+                    match_modules=matches,
+                    n_steps=n_step,
+                    current_step=current_command_step,
+                    device=device,
+                    verbose=verbose,
+                    share_listener_rewards=False,
+                    n_same_actions_required=1,
+                    advantage_type=match_adv_type,
+                    gae_lambda=gae_lambda,
+                )
+                current_command_step = current_command_step % n_step
+                # print(current_command_step)
+            else:
+                actions, la, log_probs = actions_no_match(
+                    memory=memory,
+                    models=models,
+                    episode_type=episode_type,
+                    epsilon=epsilon,
+                    obs=obs,
+                    n_agents=n_agents,
+                    n_actions=n_actions,
+                    env=env,
+                )
             # input()
             if display:
                 env.display(obs, None, 0)
@@ -400,19 +439,22 @@ def run_multi_agent_episodes(
             overall_step += 1
             current_episode_step += 1
             obs = obs_
-
+            current_command_step += 1
         # if current_episode % n_shot == (n_shot - 1):
+        if current_episode % n_shot == 0:
+            recent_rewards.clear()
+            recent_expert_rewards.clear()
         recent_rewards.append(ep_reward_hist[-1])
         recent_expert_rewards.append(ep_expert_reward_hist[-1])
 
-        if len(smooth_reward_hist) > 10:
-            er = smooth_reward_hist[-1]
-            smooth_reward_hist.append(
-                0.98 * er + 0.02 * ep_reward_hist[current_episode]
-            )
+        # if len(smooth_reward_hist) > 10:
+        #     er = smooth_reward_hist[-1]
+        #     smooth_reward_hist.append(
+        #         0.98 * er + 0.02 * ep_reward_hist[current_episode]
+        #     )
 
-        else:
-            smooth_reward_hist.append(sum(recent_rewards) / len(recent_rewards))
+        # else:
+        smooth_reward_hist.append(sum(recent_rewards) / len(recent_rewards))
         # same for expert rewards:
         if len(smooth_expert_reward_hist) > 10:
             smooth_expert_reward_hist.append(
@@ -437,16 +479,16 @@ def run_multi_agent_episodes(
         ):
             mbin = min(reward_checkpoint_bin)
             # print(smooth_reward_hist[-1])
-            # print(mbin)
-            if smooth_reward_hist[-1] > mbin:
-                print(
-                    "Checkpointing model at : ",
-                    model_path + f"r_{mbin}_supreg{supervised_reg}/",
-                )
-                models[0].save(
-                    model_path + f"r_{mbin}_supreg{supervised_reg}_{args.runid}/"
-                )
-                reward_checkpoint_bin.pop(reward_checkpoint_bin.index(mbin))
+            # print(mbin) TODO turn back on when confident
+            # if smooth_reward_hist[-1] > mbin:
+            #     print(
+            #         "Checkpointing model at : ",
+            #         model_path + f"r_{mbin}_supreg{supervised_reg}/",
+            #     )
+            #     models[0].save(
+            #         model_path + f"r_{mbin}_supreg{supervised_reg}_{args.runid}/"
+            #     )
+            #     reward_checkpoint_bin.pop(reward_checkpoint_bin.index(mbin))
 
         if current_episode % 500 == 0 and current_episode > 1 and graph_progress:
             smr = np.array(smooth_reward_hist)
@@ -780,15 +822,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "-cuda", "--cuda_device", action="store", choices=["cuda:0", "cuda:1", "cpu"]
     )
-    parser.add_argument("-eval", "--evaluate_pairwise", action="store_true")
-    parser.add_argument_group("-m_fams", "--model_families", action="store", nargs="+")
+    # parser.add_argument_group("-m_fams", "--model_families")
     parser.add_argument(
-        "-paths", "--model_paths", action="store", default="model_paths.txt"
+        "-paths", "--model_paths", action="store", default="model_paths_short.txt"
     )
 
     args = parser.parse_args()
 
-    model_fams = args.model_families
+    model_fams = ["PPO", "MDQ"]
 
     reward_bin = []
     arg_to_env_str = {
@@ -811,7 +852,7 @@ if __name__ == "__main__":
         print(f"resulting model directories: {os.listdir(rp)}")
     device = torch.device(args.cuda_device if torch.cuda.is_available() else "cpu")
 
-    graph_names, model_dirs, algos = organize_models()
+    graph_names, model_dirs, algos = organize_models(args)
 
     the_agents = get_agent(obs, args, device, n_actions)
     the_agents2 = get_agent(obs, args, device, n_actions)
@@ -839,13 +880,15 @@ if __name__ == "__main__":
     )
     for i in range(len(model_dirs)):
         for j in range(0, len(model_dirs)):
-            print(f"loading {model_dirs[i]}")
+            print(model_dirs)
+            print(i, ",", j)
+            print(f"\n\nloading {model_dirs[i]}")
             a1: Agent = the_agents[algos[i]]  # fix this
             a1.load(model_dirs[i] + "/")
             a1.eval_mode = True
-            print(f"loading {model_dirs[j]}")
+            print(f"\n\nloading {model_dirs[j]}")
             a2: Agent = the_agents2[algos[j]]
-            a2.load(model_dirs[j] + "/")
+            a2.load(model_dirs[i] + "/")
             a2.eval_mode = True
 
             rew, er, hl = run_multi_agent_episodes(
@@ -858,23 +901,37 @@ if __name__ == "__main__":
                 max_steps=(
                     10 if args.env not in ["ttt", "ttt_roles", "ttt_lever"] else 5
                 )
-                * 200,
-                MATCH=True,
+                * 400,
                 n_shot=int(args.n_shot),
                 n_step=int(args.n_step),
                 save_models=False,
                 online=True,
                 episodic=False,
+                use_match=False,
+                match_adv_type="gae",
             )
+            nshot = int(args.n_shot)
             rew = np.array(rew)
             mean_scores[i, j] = rew.mean()
             print(mean_scores[i])
-            last_scores = rew[
-                (np.arange(rew.shape[0]) % args.nshot) == (args.nshot - 1)
+            # print(rew)
+            # print(
+            #    f"arangemod: {np.arange(rew.shape[0]) % nshot}, {nshot - 1}: {rew[(np.arange(rew.shape[0]) % nshot) == (nshot - 1)]}"
+            # )
+            last_scores[i, j] = rew[
+                (np.arange(rew.shape[0]) % nshot) == (nshot - 1)
             ].mean()
             print(f"{i*len(model_dirs)+j}/{len(model_dirs)**2}")
 
-    np.save(f"score_trial_greed0_{args.n_shot}_{args.n_step}", mean_scores)
+            ep_rew_avg = np.zeros((nshot))
+            for k in range(rew.shape[0] // nshot):
+                ep_rew_avg += rew[k * nshot : (k + 1) * nshot]
+            ep_rew_avg /= rew.shape[0] // nshot
+            plt.plot(ep_rew_avg)
+            plt.show()
+
+    np.save(f"new_match_mean_score_{nshot}_{args.n_step}", mean_scores)
+    np.save(f"new_match_last_score_{nshot}_{args.n_step}", mean_scores)
     # Set ticks and labels
 
     if args.graph:
@@ -887,7 +944,20 @@ if __name__ == "__main__":
 
         # Rotate the x-tick labels for better readability
         fig.colorbar(im, ax=ax)
-        plt.title("Scores of different paired agents")
+        plt.title("Mean Scores of different paired agents")
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+        plt.show()
+
+        fig, ax = plt.subplots()
+        im = ax.imshow(last_scores)
+        ax.set_xticks(np.arange(len(graph_names)))
+        ax.set_yticks(np.arange(len(graph_names)))
+        ax.set_xticklabels(graph_names)
+        ax.set_yticklabels(graph_names)
+
+        # Rotate the x-tick labels for better readability
+        fig.colorbar(im, ax=ax)
+        plt.title("Last Scores of different paired agents")
         plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
         plt.show()
     exit()

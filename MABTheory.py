@@ -325,7 +325,7 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
 
         self.alphas *= self.gamma  # TODO cant shrink past 1, also this feels wrong
         self.betas *= self.gamma
-
+        # print(f"arms pulled before: {arms_pulled}")
         arms_pulled = np.array(arms_pulled).astype(bool)
         for i in range(self.num_arms):
             if arms_pulled[i] < 0.99:
@@ -335,6 +335,9 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
         self.betas = np.maximum(self.betas, self.beta_0)
 
         # Update parameters for active arm
+        # print(
+        #    f"advantage: {advantage}, arms pulled: {arms_pulled}, arm probs: {self.arm_avail_probs}"
+        # )
         muscale = min(
             (1 - self.lambda_) / self.arm_avail_probs[arms_pulled],
             (1 - self.lambda_) * 5,
@@ -565,7 +568,7 @@ class MATCH:
     def update_listener(self, adv, arms=None, verbose=0):  # adv is one number
         if arms is None:
             arms = self.leaders.astype(bool)
-        self.listener.update(arms_pulled=self.leaders, advantage=adv)
+        self.listener.update(arms_pulled=arms, advantage=adv)
 
     def choose_target(self, available_teammates, prior=None):
         if prior is None:
@@ -608,6 +611,7 @@ class MATCH:
         gae_lambda=0.95,
         k_step=5,
         device="cuda",
+        first_step_only=True,
         share_listener_rewards=False,
         suggested_actions=None,
         n_same_actions_required=1,
@@ -651,7 +655,7 @@ class MATCH:
                 gae_lambda=gae_lambda,
                 gamma=gamma,
             )  # TODO add if statement for individual rewards
-            print("gae adv: ", adv)
+            # print("gae adv: ", adv)
 
         elif adv_type == "td":
             G, adv = FlexibleBuffer.K_Step_TD(
@@ -662,41 +666,55 @@ class MATCH:
                 gamma=gamma,
                 k=k_step,
             )
-            print("kstep adv: ", adv)
+            # print("kstep adv: ", adv)
 
         elif adv_type == "monte":
             adv = FlexibleBuffer.G(
                 rewards=samp.__dict__[r_key],
                 terminated=samp.terminated,
-                last_value=last_value,
+                last_value=last_value.flatten(),
                 gamma=gamma,
             )
-            print("monte adv: ", adv)
+            # print("monte adv: ", adv)
             adv = adv - values
         else:
             print("adv_type not recognized")
 
         adv = adv.detach().cpu().numpy()
+        tot_adv = adv[0]
+        first_step = False
+
+        if first_step_only:
+            # sum the advantages from the start of episodes
+            for i in range(1, len(adv)):
+                if first_step:
+                    tot_adv += adv[i]
+                    first_step = False
+                if samp.terminated[i]:
+                    first_step = True
+        else:
+            tot_adv = adv.sum()
         arms = np.zeros(self.n_agents)
         arms[self.selected] = 1
-        if share_listener_rewards:
-            if suggested_actions is None:
-                ValueError("suggested actions must be provided if sharing rewards")
-            same_actions = np.full((self.n_agents, len(idx)), False, dtype=bool)
-            for agent_id in range(self.n_agents):
-                same_actions[agent_id] = (
-                    suggested_actions[self.id] == suggested_actions[agent_id]
-                )
-            ad_holder = np.zeros(self.n_agents)
+        # Future work, give some credit to other agents with similar suggestions
+        # if share_listener_rewards:
+        #     if suggested_actions is None:
+        #         ValueError("suggested actions must be provided if sharing rewards")
+        #     same_actions = np.full((self.n_agents, len(idx)), False, dtype=bool)
+        #     for agent_id in range(self.n_agents):
+        #         same_actions[agent_id] = (
+        #             suggested_actions[self.id] == suggested_actions[agent_id]
+        #         )
+        #     ad_holder = np.zeros(self.n_agents)
 
-            for agent_id in range(self.n_agents):
-                if same_actions[agent_id].sum() >= n_same_actions_required:
-                    ad_holder[agent_id] = adv[same_actions[agent_id]].mean()
-                    arms[agent_id] = same_actions[agent_id].mean()
-            adv = ad_holder
+        #     for agent_id in range(self.n_agents):
+        #         if same_actions[agent_id].sum() >= n_same_actions_required:
+        #             ad_holder[agent_id] = adv[same_actions[agent_id]].mean()
+        #             arms[agent_id] = same_actions[agent_id].mean()
+        #     adv = ad_holder
 
         # returns the advantage for the arms in general as one number, or for each arm pulled if suggested actions are the same
-        return adv, arms
+        return tot_adv[0], arms
 
 
 def symmetric_advantage(n_agents):

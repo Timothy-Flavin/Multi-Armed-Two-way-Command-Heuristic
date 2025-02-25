@@ -151,7 +151,7 @@ class TTTWrapped(Wrapper):
             nfirst=nfirst,
             n_moves=n_moves,
             render_mode=render_mode,
-            random_op=random_op,
+            op_type="random",
             obs_as_array=obs_as_array,
         )
         self.state = np.zeros(18, dtype=np.float32)

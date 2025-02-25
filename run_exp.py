@@ -471,7 +471,7 @@ def run_multi_agent_episodes(
                 inds = np.arange(n_agents)
                 np.random.shuffle(inds)
                 # if episodic:
-                if online and memory.steps_recorded > 999:
+                if online and memory.steps_recorded > 1023:
                     exp = memory.sample_transitions(
                         as_torch=True,
                         device=device,
@@ -1184,22 +1184,22 @@ if __name__ == "__main__":
             hidden_dims=np.array([96, 64]),
             # min_actions=continuous_env.action_space.low,
             # max_actions=continuous_env.action_space.high,
-            gamma=0.977,
+            gamma=0.99,
             device="cuda",
-            entropy_loss=0.001,
-            mini_batch_size=256,
+            entropy_loss=0.01,
+            mini_batch_size=128,
             n_epochs=4,
             lr=1e-3,
             advantage_type="gae",
             norm_advantages=True,
             anneal_lr=2000000,
-            value_loss_coef=0.05,
-            ppo_clip=0.15,
+            value_loss_coef=0.5,
+            ppo_clip=0.2,
             # value_clip=0.5,
             orthogonal=True,
             activation="tanh",
             starting_actorlogstd=0,
-            gae_lambda=0.8,
+            gae_lambda=0.95,
         )
         # model=PG.load()
         # model.eval_mode = True
