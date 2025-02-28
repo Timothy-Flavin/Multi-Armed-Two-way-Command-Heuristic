@@ -547,14 +547,17 @@ class MATCH:
         self.n_options = 1
         self.selected = 0
 
-    def policy_with_oracle(self, commanded_by, told_to, prior=None):
+    def policy_with_oracle(self, commanded_by, told_to, prior=None, stubborn=False):
         self.told_to = np.copy(told_to)
         self.commanded_by = np.copy(commanded_by)
         # self.n_options = np.sum(commanded_by)
         self.commanded_by[self.id] = 1
-        leader = self.listener.choose(
-            available_teammates=self.commanded_by, prior=prior
-        )
+        if stubborn:
+            leader = self.id
+        else:
+            leader = self.listener.choose(
+                available_teammates=self.commanded_by, prior=prior
+            )
 
         self.leaders = np.zeros(self.n_agents)
         self.leaders[leader] = 1
@@ -570,12 +573,15 @@ class MATCH:
             arms = self.leaders.astype(bool)
         self.listener.update(arms_pulled=arms, advantage=adv)
 
-    def choose_target(self, available_teammates, prior=None):
+    def choose_target(self, available_teammates, prior=None, stubborn=False):
         if prior is None:
             prior = self.prior
-        self.targets = self.speaker.choose(
-            available_teammates=available_teammates, prior=prior
-        )
+        if stubborn:
+            self.targets = available_teammates.astype(float)
+        else:
+            self.targets = self.speaker.choose(
+                available_teammates=available_teammates, prior=prior
+            )
         return self.targets.copy()
 
     def update_speaker(
