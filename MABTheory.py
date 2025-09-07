@@ -338,7 +338,9 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
         # print(
         #    f"advantage: {advantage}, arms pulled: {arms_pulled}, arm probs: {self.arm_avail_probs}"
         # )
-        muscale = min(
+        # print(self.lambda_)
+        # print()
+        muscale = np.minimum(
             (1 - self.lambda_) / self.arm_avail_probs[arms_pulled],
             (1 - self.lambda_) * 5,
         )
@@ -955,11 +957,229 @@ def test_match(n_agents, n_steps, n_trials, adv, verbose=False, skillvec=np.ones
         plt.show()
 
 
+def e_v(policy, rewards):
+    ev = 0.0
+    for a1 in range(len(policy)):
+        for a2 in range(len(policy)):
+            ev += policy[a1] * policy[a2] * rewards[a1, a2]
+    return ev
+
+
+def match_bos(
+    n_agents=2,
+    n_steps=50,
+    n_trials=50,
+    verbose=False,
+    rewards=np.array([[1.5, 0], [0, 1]]),
+    policies=np.array([[1.0, 0.0], [0.0, 1.0]]),
+):
+    if verbose:
+        print(f"Agents following policies {policies} \nfor rewards: {rewards}")
+        print(
+            f"Show expected values: {e_v(policies[0],rewards)}, {e_v(policies[1],rewards)}"
+        )
+    V = []
+    for a in range(n_agents):
+        V.append(e_v(policies[a], rewards))
+    perf = np.zeros(shape=(n_steps, n_trials))
+    listenermus = np.zeros(shape=(n_steps, n_agents, n_agents))
+    speakermus = np.zeros(shape=(n_steps, n_agents, n_agents))
+    action_dist = np.zeros(shape=(n_steps, n_agents * n_agents))
+    for trial in range(n_trials):
+        matches = [
+            MATCH(
+                n_agents, i, single=False, lambda_=0.90, gamma=0.98, speaker_decay=0.999
+            )
+            for i in range(n_agents)
+        ]
+        for i in range(n_steps):
+            targets = np.zeros((n_agents, n_agents), dtype=np.int64)
+            speaker_adv = np.zeros((n_agents, n_agents))
+            for a in range(n_agents):
+                mtc = matches[a]
+                mtc: MATCH
+                targets[a] = mtc.choose_target(
+                    prior=None, available_teammates=np.ones(n_agents)
+                )
+            if verbose:
+                print(f"targets: \n{targets}")
+            actions = np.zeros(n_agents, dtype=np.int64)
+            told_to = np.zeros((n_agents, n_agents), dtype=np.int64)
+            leaders = np.zeros(n_agents)
+            for ai in range(n_agents):
+                for aj in range(n_agents):
+                    told_to[ai, aj] = np.argmax(
+                        np.random.multinomial(1, pvals=policies[ai])
+                    )
+            if verbose:
+                print(f"told_to: {told_to}")
+            for a in range(n_agents):
+                mtc = matches[a]
+                mtc: MATCH
+                options = targets[:, a].flatten().copy()
+                chosen_action, leader = mtc.policy_with_oracle(
+                    commanded_by=options,
+                    prior=np.zeros(n_agents),
+                    told_to=told_to[:, a],
+                )
+                if verbose:
+                    print(
+                        f"agent: {a}, chosing from: {options}, leader: {leader} with action {chosen_action} from policy {policies[leader]}"
+                    )
+                # TODO update all speakers for which the action matches
+                actions[a] = chosen_action
+                leaders[a] = leader
+                # if we listened, then that commander gets a bonus
+                speaker_adv[leader, a] = (
+                    1 if options[leader] > 0.5 else 0
+                )  # if a != leader else 0
+            perf[i, trial] = rewards[actions[0], actions[1]]
+            action_dist[i, actions[0] + 2 * actions[1]] += 1
+            if verbose:
+                print(
+                    f"Chosen actions: {actions}, rewards: {rewards[actions[0],actions[1]]}"
+                )
+
+            if verbose:
+                print(f"speaker_adv: \n{speaker_adv}")
+            augmented_targets = np.copy(targets)
+            for ag in range(n_agents):
+                augmented_targets[ag, ag] = 1
+            for speaker in range(n_agents):
+                mtc = matches[speaker]
+                mtc: MATCH
+                matches[speaker].update_speaker(
+                    adv=speaker_adv[speaker],
+                    n_options=augmented_targets.sum(axis=0).flatten() - 1,
+                )
+                if verbose:
+                    print(
+                        f"updateing speaker: {speaker} with adv: {speaker_adv[speaker]} and targets: {matches[speaker].targets} with n_options {augmented_targets.sum(axis=0).flatten()}"
+                    )
+            for listener in range(n_agents):
+                mtc = matches[listener]
+                mtc: MATCH
+                l = mtc.selected
+                # ad = np.random.normal(loc=adv[listener, l], scale=0.5)
+                ad = rewards[actions[0], actions[1]] - V[listener]
+                if verbose:
+                    print(
+                        f" listener: {listener} followed leader: {l} from {mtc.leaders} and got adv {ad}: r{rewards[actions[0], actions[1]]} - V{V[listener]}"
+                    )
+                matches[listener].update_listener(adv=ad)
+
+            for ag in range(n_agents):
+                listenermus[i, ag] += matches[ag].listener.mu.copy()
+                speakermus[i, ag] += matches[ag].speaker.dist_mode()
+                # print(matches[ag].listener.mu.copy())
+                # print(mus[i])
+            if verbose:
+                print("matches: ")
+                for m in matches:
+                    print(m)
+                input()
+        # print(matches[0].listener)
+        # print(matches[1].listener)
+        # print(matches[2].listener)
+    action_dist = action_dist / n_trials
+    mus = listenermus / n_trials
+    speakermus = speakermus / n_trials
+    avg_perf = perf.mean(axis=-1)
+
+    return action_dist, mus, speakermus, avg_perf
+
+
+def plot_bos(action_dist, mus, speakermus, avg_perf):
+
+    plt.plot(avg_perf)
+    plt.show()
+
+    for a in range(4):
+        plt.plot(action_dist[:, a])
+    plt.title("Action distribution")
+    plt.legend(["0,0", "1,0", "0,1", "1,1"])
+    plt.show()
+
+    for agent in range(n_agents):
+        leg = []
+        for arm in range(n_agents):
+            plt.plot(mus[:, agent, arm])
+            leg.append(f"arm: {arm}")
+        plt.legend(leg)
+        plt.title(f"Agent {agent} listener mus over time")
+        plt.show()
+
+    for agent in range(n_agents):
+        leg = []
+        for arm in range(n_agents):
+            plt.plot(speakermus[:, agent, arm])
+            leg.append(f"arm: {arm}")
+        plt.legend(leg)
+        plt.title(f"Agent {agent} speaker probs over time")
+        plt.show()
+
+
+def bos_experiments():
+    trials = {
+        "Action Dist": [],
+        "Listener Mean": [],
+        "Speaker Mean": [],
+        "Performance": [],
+        "Titles": [],
+    }
+
+    a, lis, s, p = match_bos(
+        n_agents=2,
+        n_steps=300,
+        n_trials=500,
+        verbose=False,
+        rewards=np.array([[1.0, 0.0], [0.0, 1.0]]),
+        policies=np.array([[1.0, 0.0], [0.0, 1.0]]),
+    )
+    trials["Titles"].append("Basic [1,1], pi_1: 1.0, pi_2: 0.0")
+    trials["Action Dist"].append(a)
+    trials["Listener Mean"].append(lis)
+    trials["Speaker Mean"].append(s)
+    trials["Performance"].append(p)
+
+    a, lis, s, p = match_bos(
+        n_agents=2,
+        n_steps=300,
+        n_trials=500,
+        verbose=False,
+        rewards=np.array([[3.0, 0.0], [0.0, 1.0]]),
+        policies=np.array([[0.5, 0.5], [0.0, 1.0]]),
+    )
+    trials["Titles"].append("Variance [3,1], pi_1: 0.5, pi_2: 0.0")
+    trials["Action Dist"].append(a)
+    trials["Listener Mean"].append(lis)
+    trials["Speaker Mean"].append(s)
+    trials["Performance"].append(p)
+
+    a, lis, s, p = match_bos(
+        n_agents=2,
+        n_steps=300,
+        n_trials=500,
+        verbose=False,
+        rewards=np.array([[2.0, 0.0], [0.0, 1.0]]),
+        policies=np.array([[1.0, 0.0], [0.0, 1.0]]),
+    )
+    trials["Titles"].append("Uneven [2,1], pi_1: 1.0, pi_2: 0.0")
+    trials["Action Dist"].append(a)
+    trials["Listener Mean"].append(lis)
+    trials["Speaker Mean"].append(s)
+    trials["Performance"].append(p)
+    exit()
+
+
+# WARNING: The script isympy.exe is installed in 'C:\Users\tcfla\AppData\Roaming\Python\Python312\Scripts' which is not on PATH.
+# Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
 if __name__ == "__main__":
     # check_baseline(5)
     n_agents = 5
     n_steps = 500
     n_trials = 100
+
     # test_thompsons(n_agents, 500, 500)
     # exit()
 

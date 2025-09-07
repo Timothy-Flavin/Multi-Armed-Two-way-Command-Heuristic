@@ -1,0 +1,10 @@
+./PaperExperiment/TTT/algo_PPO/model_checkpoints/
+./PaperExperiment/TTT/algo_DQ/model_checkpoints/
+
+r_0.0_supregFalse
+r_0.4_supregFalse
+r_0.8_supregFalse
+
+r_0.0_supregFalse
+r_0.4_supregFalse
+r_0.8_supregFalse

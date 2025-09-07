@@ -737,9 +737,9 @@ def organize_models(args):
     for i, rp in enumerate(res_paths):
         for d in dir_lists[i]:
             # if d[-1] != "0":
-            print(d[2:6].replace("_", ""))
-            if float(d[2:6].replace("_", "")) <= 0.7:
-                continue
+            # print(d[2:6].replace("_", ""))
+            # if float(d[2:6].replace("_", "")) <= 0.7:
+            #    continue
             # if d[-1] != "0":
             # continue
             # print(d)
@@ -756,7 +756,7 @@ def organize_models(args):
         print(md[8:11])
         print(float(md[2:5]) + (1000 if md[8:11] == "MDQ" else 0))
 
-    if True:
+    if False:
         model_dirs = [
             x
             for _, x in sorted(
@@ -824,12 +824,12 @@ if __name__ == "__main__":
     )
     # parser.add_argument_group("-m_fams", "--model_families")
     parser.add_argument(
-        "-paths", "--model_paths", action="store", default="model_paths_short.txt"
+        "-paths", "--model_paths", action="store", default="model_paths_ttt.txt"
     )
 
     args = parser.parse_args()
 
-    model_fams = ["PPO", "MDQ"]
+    model_fams = ["PPO", "DQ"]
 
     reward_bin = []
     arg_to_env_str = {
@@ -908,6 +908,9 @@ if __name__ == "__main__":
                 online=True,
                 episodic=False,
                 use_match=True,
+                match_lambda=0.95,
+                match_gamma=0.98,
+                gae_lambda=0.98,
                 match_adv_type="gae",
             )
             nshot = int(args.n_shot)
@@ -930,8 +933,8 @@ if __name__ == "__main__":
             plt.plot(ep_rew_avg)
             plt.show()
 
-    np.save(f"new_match_mean_score_{nshot}_{args.n_step}", mean_scores)
-    np.save(f"new_match_last_score_{nshot}_{args.n_step}", mean_scores)
+    np.save(f"new_match_mean_score1_{args.n_shot}_{args.n_step}", mean_scores)
+    np.save(f"new_match_last_score1_{args.n_shot}_{args.n_step}", mean_scores)
     # Set ticks and labels
 
     if args.graph:
