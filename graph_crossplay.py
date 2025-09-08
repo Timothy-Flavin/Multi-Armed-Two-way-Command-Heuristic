@@ -2,37 +2,139 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-graph_names = [
-    "PPO R: 0.0 seed: 0",
-    "PPO R: 0.4 seed: 0",
-    "PPO R: 0.9 seed: 0",
-    "PPO R: 0.0 seed: 1",
-    "PPO R: 0.4 seed: 1",
-    "PPO R: 0.9 seed: 1",
-    "MDQ R: 0.0 seed: 0",
-    "MDQ R: 0.4 seed: 0",
-    "MDQ R: 0.9 seed: 0",
-    "MDQ R: 0.0 seed: 1",
-    "MDQ R: 0.4 seed: 1",
-    "MDQ R: 0.9 seed: 1",
-]
+LEVEL = "overcooked"
+if LEVEL == "TTT":
+    graph_names = [
+        "PPO R: 0.0 seed: 0",
+        "PPO R: 0.4 seed: 0",
+        "PPO R: 0.9 seed: 0",
+        "PPO R: 0.0 seed: 1",
+        "PPO R: 0.4 seed: 1",
+        "PPO R: 0.9 seed: 1",
+        "MDQ R: 0.0 seed: 0",
+        "MDQ R: 0.4 seed: 0",
+        "MDQ R: 0.9 seed: 0",
+        "MDQ R: 0.0 seed: 1",
+        "MDQ R: 0.4 seed: 1",
+        "MDQ R: 0.9 seed: 1",
+    ]
+    root = "./"
+elif LEVEL == "overcooked":
+    graph_names = [
+        "PPO R: 40  seed: 0",
+        "PPO R: 80  seed: 0",
+        "PPO R: 100 seed: 0",
+        "PPO R: 40  seed: 1",
+        "PPO R: 80  seed: 1",
+        "PPO R: 100 seed: 1",
+        "PPO R: 180 seed: 1",
+        "MDQ R: 40  seed: 0",
+        "MDQ R: 80  seed: 0",
+        "MDQ R: 100 seed: 0",
+        "MDQ R: 40  seed: 1",
+        "MDQ R: 80  seed: 1",
+        "MDQ R: 100 seed: 1",
+        "MDQ R: 166 seed: 1",
+    ]
+    root = "./overcookedscores/"
+
 
 for use_match in [False, True]:
-    for nshot in [25, 50, 100, 200, 500]:
-        for n_step in [1, 2, 3, 4, 5]:
+    for nshot in [25, 50, 100, 200, 500] if LEVEL == "TTT" else [1, 2, 3, 4, 5]:
+        for n_step in [1, 2, 3, 4, 5] if LEVEL == "TTT" else [5, 10, 15, 20, 25]:
             for advantage_type in ["monte", "gae", "None"]:
                 for stubborn in [False, True]:
                     for mode in ["mean", "last"]:
                         if os.path.exists(
-                            f"match_{use_match}_{mode}_score_{nshot}_{n_step}_{advantage_type}_{stubborn}.npy"
+                            f"{root}match_{use_match}_{mode}_score_{nshot}_{n_step}_{advantage_type}_{stubborn}.npy"
                         ):
                             scores = np.load(
-                                f"match_{use_match}_{mode}_score_{nshot}_{n_step}_{advantage_type}_{stubborn}.npy"
+                                f"{root}match_{use_match}_{mode}_score_{nshot}_{n_step}_{advantage_type}_{stubborn}.npy"
                             )
                         else:
                             continue
-
-                        if True:
+                        # print(
+                        #    f"{root}match_{use_match}_{mode}_score_{nshot}_{n_step}_{advantage_type}_{stubborn}.npy"
+                        # )
+                        # print(scores.shape)
+                        if False:
+                            scores[1] = np.array(
+                                [
+                                    31.82,
+                                    52.72,
+                                    67.28,
+                                    37.76,
+                                    52.76,
+                                    79.06,
+                                    26.94,
+                                    35.4,
+                                    28.02,
+                                    12.54,
+                                    36.54,
+                                    50.3,
+                                    56.42,
+                                    107.7,
+                                ]
+                            )
+                            scores[0] = np.array(
+                                [
+                                    31.48,
+                                    44.32,
+                                    35.88,
+                                    27.14,
+                                    24.26,
+                                    40.96,
+                                    15.62,
+                                    23.52,
+                                    31.04,
+                                    32.36,
+                                    16.22,
+                                    10.6,
+                                    2.82,
+                                    9.06,
+                                ]
+                            )
+                            scores[3] = np.array(
+                                [
+                                    67,
+                                    47.66,
+                                    148,
+                                    86,
+                                    175,
+                                    128,
+                                    93.3,
+                                    60,
+                                    65,
+                                    150,
+                                    41,
+                                    70,
+                                    152,
+                                    125,
+                                ]
+                            )
+                            scores[4] = np.array(
+                                [
+                                    111,
+                                    38,
+                                    55.3,
+                                    41,
+                                    32,
+                                    116,
+                                    135,
+                                    79.6,
+                                    102,
+                                    12,
+                                    59,
+                                    60,
+                                    28,
+                                    77,
+                                ]
+                            )
+                            graph_names[0] = "MDQN PBR"
+                            graph_names[1] = "PPO PBR"
+                            graph_names[3] = "PPO OM"
+                            graph_names[4] = "MDQN OM"
+                        if False:
                             scores[0] = np.array(
                                 [
                                     -0.21188628,
@@ -110,9 +212,12 @@ for use_match in [False, True]:
                         ax.set_yticklabels(graph_names)
 
                         # Rotate the x-tick labels for better readability
-                        im.set_clim(-1, 1)
-                        fig.colorbar(im, ax=ax)
-
+                        if LEVEL == "overcooked":
+                            im.set_clim(0, 120)
+                            fig.colorbar(im, ax=ax)
+                        else:
+                            im.set_clim(-1, 1)
+                            fig.colorbar(im, ax=ax)
                         plt.title(
                             f"{mode} Scores of {'stubborn' if stubborn else ''} match: {use_match}, nshot {nshot}, nstep {n_step} adv {advantage_type}"
                         )

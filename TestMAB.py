@@ -47,9 +47,10 @@ def handle_actions(
 
     if episode_type == Episode_Type.EVAL:
         with torch.no_grad():
-            discrete_actions, continuous_actions, dlp, clp, value = model.train_actions(
+            discrete_actions, continuous_actions, dlp, clp, value = model.train_action(
                 obs, avail_actions, step=True
             )
+
             action = discrete_actions[0]  # TODO: Make env wrapper process this better
             if isinstance(dlp, int):
                 # Because non policy-gradient algorithms return 0
@@ -58,7 +59,7 @@ def handle_actions(
                 lp = dlp[0]
 
     elif episode_type == Episode_Type.RL:
-        discrete_actions, continuous_actions, dlp, clp, value = model.train_actions(
+        discrete_actions, continuous_actions, dlp, clp, value = model.train_action(
             obs, avail_actions, step=True
         )
         action = discrete_actions[0]  # TODO: Make this handle both action spaces
@@ -189,7 +190,7 @@ def actions_match(
                 # Get the command contents for each agent
                 for target in range(n_agents):
                     if target == agent_id or command_targets[agent_id, target] > 0:
-                        act, _, lp, __, qv = models[agent_id].train_actions(
+                        act, _, lp, __, qv = models[agent_id].train_action(
                             obs[target], la[target]
                         )
                         command_contents[agent_id, target] = act[
@@ -207,7 +208,7 @@ def actions_match(
                 command_targets[agent_id] = match_modules[agent_id].targets
                 for target in range(n_agents):
                     if target == agent_id or command_targets[agent_id, target] > 0:
-                        act, _, lp, __, qv = models[agent_id].train_actions(
+                        act, _, lp, __, qv = models[agent_id].train_action(
                             obs[target], la[target]
                         )
                         command_contents[agent_id, target] = act[0]
@@ -307,6 +308,7 @@ def run_multi_agent_episodes(
     gae_lambda=0.90,
     match_adv_type="gae",
     stubborn=False,
+    device="cpu",
 ):
     print(
         f"Running {episode_type} episodes online: {online}, episodic: {episodic} ms:{max_steps}"
@@ -430,7 +432,7 @@ def run_multi_agent_episodes(
                 inds = np.arange(n_agents)
                 np.random.shuffle(inds)
                 # if episodic:
-                if online and memory.steps_recorded > 256:
+                if online and memory.steps_recorded > 190:
                     exp = memory.sample_transitions(
                         as_torch=True,
                         device=device,
@@ -597,11 +599,11 @@ def get_agent(obs, args, device, n_actions):
             discrete_action_dims=[n_actions],
             hidden_dims=[64, 64],
             device=device,
-            lr=1e-3,
+            lr=3e-4,
             activation="relu",
             dueling=True,
             n_c_action_bins=0,
-            entropy=0.03,
+            entropy=0.1,
             munchausen=0.9,
         ),
         "PPO": PG(
@@ -611,22 +613,22 @@ def get_agent(obs, args, device, n_actions):
             hidden_dims=np.array([96, 64]),
             # min_actions=continuous_env.action_space.low,
             # max_actions=continuous_env.action_space.high,
-            gamma=0.99,
+            gamma=0.977,
             device=device,
-            entropy_loss=0.01,
-            mini_batch_size=16,
-            n_epochs=4,
-            lr=1e-4,
+            entropy_loss=0.001,
+            mini_batch_size=64,
+            n_epochs=2,
+            lr=1e-3,
             advantage_type="gae",
             norm_advantages=True,
             anneal_lr=2000000,
-            value_loss_coef=0.5,
-            ppo_clip=0.2,
+            value_loss_coef=0.05,
+            ppo_clip=0.15,
             # value_clip=0.5,
             orthogonal=True,
             activation="tanh",
             starting_actorlogstd=0,
-            gae_lambda=0.98,
+            gae_lambda=0.8,
         ),
         "PG": PG(
             obs_dim=obs.shape[1],
@@ -854,7 +856,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "-paths", "--model_paths", action="store", default="model_paths_short.txt"
     )
-
+    parser.add_argument("--pbr", action="store_true")
+    parser.add_argument("--om", action="store_true")
+    parser.add_argument("--seed", action="store", default=0)
+    parser.add_argument("--rl_model", action="store", default=None)
     args = parser.parse_args()
 
     model_fams = ["PPO", "MDQ"]
@@ -867,6 +872,7 @@ if __name__ == "__main__":
         "ttt_roles": "TTTRoles",
         "ttt_lever": "TTTLever",
     }
+    print(arg_to_env_str[args.env])
     results_path = "./PaperExperiment/" + f"{arg_to_env_str[args.env]}/"
 
     env, n_actions, n_agents, results_path, obs, reward_bin = get_env(
@@ -878,7 +884,8 @@ if __name__ == "__main__":
         rp = results_path + f"algo_{r}/model_checkpoints/"
         print(f"avail results_path: {rp}")
         print(f"resulting model directories: {os.listdir(rp)}")
-    device = torch.device(args.cuda_device if torch.cuda.is_available() else "cpu")
+    device = args.cuda_device
+    # torch.device(args.cuda_device if torch.cuda.is_available() else "cpu")
 
     graph_names, model_dirs, algos = organize_models(args)
 
@@ -907,49 +914,89 @@ if __name__ == "__main__":
         },
     )
 
-    pretrain_to_pop = False
+    pretrain_to_pop = args.pbr or args.om
+    print(f"pretrain to population: {pretrain_to_pop}")
     if pretrain_to_pop:
         response_agents = []
-        # mdqn [-0.21188628 -0.29584076 -0.20894605 -0.75678952 -0.51931076 -0.55947318 -0.35839677 -0.11089039  0.06327153 -0.97824456 -0.97715295 -0.44132854]
-        # PPO  [-0.12306626  0.14277359  0.01765025 -1.         -1.         -1.         -0.40717958 -0.40405242 -0.12772761 -1.         -1.         -1.        ]
+
+        # TTT
+        # mdqn pop[-0.21188628 -0.29584076 -0.20894605 -0.75678952 -0.51931076 -0.55947318 -0.35839677 -0.11089039  0.06327153 -0.97824456 -0.97715295 -0.44132854]
+        # PPO  pop[-0.12306626  0.14277359  0.01765025 -1.         -1.         -1.         -0.40717958 -0.40405242 -0.12772761 -1.         -1.         -1.        ]
         # PPO specific [-0.02451197  0.01145004  0.25451705  0.03941464 -0.09084617  0.1024813 -0.3901283   0.07405521 -0.05561576 -0.17317132  0.0625719   0.06208748]
         # MDQ specific [-0.35981497  0.07939706  0.36643528 -0.24241677 -0.00585408  0.55788737 0.06444411  0.38679748  0.44089022 -0.0434205  -0.07143315  0.55579378]
-        alg = "PPO"
-        for r in range(len(model_dirs)):
+        # overcooked
+        # ppo pop: [ 31.82  52.72  67.28  37.76  52.76  79.06  26.94  35.4   28.02  12.54 36.54  50.3   56.42 107.7]
+        # mdq pop: 31.48 44.32 35.88 27.14 24.26 40.96 15.62 23.52 31.04 32.36 16.22 10.6 2.82  9.06
+        # ppo specific: 19.69230769  13.11538462  24.69230769  37.5         58.69230769 11.65384615 118.88461538  12.30769231  21.30769231  10.73076923 25.23076923  40.42307692  41.26923077  39.42307692
+        # MDQ specific: [28.03846154 41.76923077 12.69230769 28.69230769  7.76923077  4.26923077 16.30769231 13.46153846 88.88461538  5.34615385 38.30769231 54.26923077 65.19230769  6.92307692]
+        # print(model_dirs)
+        # input("Does this make sense?")
+        alg = args.rl_model if args.rl_model is not None else model_fams[0]
+        j = 0
+        if args.pbr:
             a1 = get_agent(obs, args, device, n_actions)[alg]
+            a1.to(device)
             a1.mini_batch_size = 64
             response_agents.append(a1)
-            # for j in range(100000 // 100):
-            # r = np.random.randint(0, len(model_dirs))
-            # r = 8
-            # print(f"\n\nloading {model_dirs[r]}")
+        for r in range(len(model_dirs) if args.om else 1):
+            # Set torch rng seed for reproducibility
+            mem.reset()
+            torch.manual_seed(int(args.seed))
+            np.random.seed(int(args.seed))
+            if args.om:
+                a1 = get_agent(obs, args, device, n_actions)[alg]
+                a1.to(device)
+                a1.mini_batch_size = 64
+                response_agents.append(a1)
             a2: Agent = the_agents2[algos[r]]
-            a2.load(model_dirs[r] + "/")
+            a2.load(model_dirs[r] + "/", device=args.cuda_device)
+            a2.to(device)
             a2.eval_mode = True
-            rew, er, hl = run_multi_agent_episodes(
-                env=env,
-                models=[a1, a2],
-                n_agents=2,
-                episode_type=Episode_Type.RL,
-                memory=mem,
-                imitation_memory=mem,
-                max_steps=120000,
-                n_shot=int(args.n_shot),
-                n_step=int(args.n_step),
-                save_models=False,
-                online=alg == "PPO",
-                episodic=False,
-                use_match=False,
-                # match_adv_type=args.advantage_type,
-                # stubborn=args.stubborn,
+            for j in range(500):
+                if args.pbr:
+                    r = np.random.randint(0, len(model_dirs))
+                    a2: Agent = the_agents2[algos[r]]
+                    print(f"\n\nloading {model_dirs[r]}")
+                    a2.load(model_dirs[r] + "/", device=args.cuda_device)
+                    a2.to(device)
+                    a2.eval_mode = True
+                # r = 8
+                # print(f"\n\nloading {model_dirs[r]}")
+
+                rew, er, hl = run_multi_agent_episodes(
+                    env=env,
+                    models=[a1, a2],
+                    n_agents=2,
+                    episode_type=Episode_Type.RL,
+                    memory=mem,
+                    imitation_memory=mem,
+                    max_steps=400,
+                    n_shot=int(args.n_shot),
+                    n_step=int(args.n_step),
+                    save_models=False,
+                    online=alg == "PPO",
+                    episodic=False,
+                    use_match=False,
+                    device=args.cuda_device,
+                    # match_adv_type=args.advantage_type,
+                    # stubborn=args.stubborn,
+                )
+                print(mem.steps_recorded)
+                print(f"{j}, rew: {rew.mean()} partner agent: {r}")
+            a1.save(
+                f'./{args.env}_response_agents/{"om" if args.om else "pbr"}_response_agent_run_{args.runid}_family_{alg}/'
             )
-            # print(f"{j}, rew: {rew.mean()}")
+        # for x in range(len(response_agents)):
         for j in range(len(model_dirs)):
             print(f"\n\nloading {model_dirs[j]}")
-            a1 = response_agents[j]
+            if args.pbr:
+                a1 = response_agents[0]
+            else:
+                a1 = response_agents[j]
             a1.eval_mode = True
             a2: Agent = the_agents2[algos[j]]
-            a2.load(model_dirs[j] + "/")
+            a2.load(model_dirs[j] + "/", device=args.cuda_device)
+            a2.to(device)
             a2.eval_mode = True
 
             rew, er, hl = run_multi_agent_episodes(
@@ -959,7 +1006,7 @@ if __name__ == "__main__":
                 episode_type=Episode_Type.RL,
                 memory=mem,
                 imitation_memory=mem,
-                max_steps=500,
+                max_steps=5000,
                 n_shot=int(args.n_shot),
                 n_step=int(args.n_step),
                 save_models=False,
@@ -968,6 +1015,7 @@ if __name__ == "__main__":
                 use_match=False,
                 match_adv_type=args.advantage_type,
                 stubborn=args.stubborn,
+                device=args.cuda_device,
             )
             nshot = int(args.n_shot)
             rew = np.array(rew)
@@ -987,7 +1035,11 @@ if __name__ == "__main__":
                 ep_rew_avg += rew[k * nshot : (k + 1) * nshot]
             ep_rew_avg /= rew.shape[0] // nshot
             print(mean_scores[0])
-
+        np.save(
+            file=f'./{args.env}_response_scores/{"om" if args.om else "pbr"}_response_mean_scores_run_{args.runid}_family_{alg}',
+            arr=mean_scores[0],
+            # f"./overcookedscores/response_mean_score_{nshot}_{args.n_step}_{args.advantage_type}_{args.stubborn}",
+        )
     if pretrain_to_pop:
         exit()
 
@@ -997,12 +1049,14 @@ if __name__ == "__main__":
             print(i, ",", j)
             print(f"\n\nloading {model_dirs[i]}")
             a1: Agent = the_agents[algos[i]]  # fix this
-            a1.load(model_dirs[i] + "/")
+            a1.load(model_dirs[i] + "/", device=args.cuda_device)
             a1.eval_mode = args.rlresponse
+            a1.to(device)
             a1.mini_batch_size = 16
             print(f"\n\nloading {model_dirs[j]}")
             a2: Agent = the_agents2[algos[j]]
-            a2.load(model_dirs[j] + "/")
+            a2.load(model_dirs[j] + "/", device=args.cuda_device)
+            a2.to(device)
             a2.eval_mode = True
 
             rew, er, hl = run_multi_agent_episodes(
@@ -1021,6 +1075,7 @@ if __name__ == "__main__":
                 use_match=args.use_match,
                 match_adv_type=args.advantage_type,
                 stubborn=args.stubborn,
+                device=args.cuda_device,
             )
             nshot = int(args.n_shot)
             rew = np.array(rew)
@@ -1115,6 +1170,7 @@ if __name__ == "__main__":
         online=online,
         episodic=episodic,
         reward_checkpoint_bin=reward_bin,
+        device=args.cuda_device,
     )
 
     filename = f"demo_{args.demo}_human_reg{args.supreg}_hf_{args.hum_feedback}_run{args.runid}_"

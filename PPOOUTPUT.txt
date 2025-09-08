@@ -1,0 +1,560 @@
+self.actor_logstd = torch.load(checkpoint_path + "/actor_logstd")
+Running Episode_Type.RL episodes online: True, episodic: False ms:200000
+Episode: 0     Episode steps: 200   Return: 6.0   smooth: 6.0
+Episode: 50    Episode steps: 200   Return: 28.0  smooth: 28.0
+Episode: 100   Episode steps: 200   Return: 59.0  smooth: 59.0
+Episode: 150   Episode steps: 200   Return: 20.0  smooth: 20.0
+Episode: 200   Episode steps: 200   Return: 90.0  smooth: 90.0
+Episode: 250   Episode steps: 200   Return: 70.0  smooth: 70.0
+Episode: 300   Episode steps: 200   Return: 85.0  smooth: 85.0
+Episode: 350   Episode steps: 200   Return: 65.0  smooth: 65.0
+Episode: 400   Episode steps: 200   Return: 59.0  smooth: 59.0
+Episode: 450   Episode steps: 200   Return: 78.0  smooth: 78.0
+Episode: 500   Episode steps: 200   Return: 50.0  smooth: 50.0
+Episode: 550   Episode steps: 200   Return: 8.0   smooth: 8.0
+Episode: 600   Episode steps: 200   Return: 75.0  smooth: 75.0
+Episode: 650   Episode steps: 200   Return: 56.0  smooth: 56.0
+Episode: 700   Episode steps: 200   Return: 88.0  smooth: 88.0
+Episode: 750   Episode steps: 200   Return: 39.0  smooth: 39.0
+Episode: 800   Episode steps: 200   Return: 28.0  smooth: 28.0
+Episode: 850   Episode steps: 200   Return: 64.0  smooth: 64.0
+Episode: 900   Episode steps: 200   Return: 61.0  smooth: 61.0
+Episode: 950   Episode steps: 200   Return: 76.0  smooth: 76.0
+23
+0, rew: 53.214
+520 [64, 64]
+520 [64, 64]
+520 [64, 64]
+[96 64]
+520 [96 64]
+[64 64]
+520 [64 64]
+[96 64]
+520 [96 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:200000
+Episode: 0     Episode steps: 200   Return: 28.0  smooth: 28.0
+Episode: 50    Episode steps: 200   Return: 17.0  smooth: 17.0
+Episode: 100   Episode steps: 200   Return: 36.0  smooth: 36.0
+Episode: 150   Episode steps: 200   Return: 14.0  smooth: 14.0
+Episode: 200   Episode steps: 200   Return: 23.0  smooth: 23.0
+Episode: 250   Episode steps: 200   Return: 28.0  smooth: 28.0
+Episode: 300   Episode steps: 200   Return: 28.0  smooth: 28.0
+Episode: 350   Episode steps: 200   Return: 37.0  smooth: 37.0
+Episode: 400   Episode steps: 200   Return: 50.0  smooth: 50.0
+Episode: 450   Episode steps: 200   Return: 14.0  smooth: 14.0
+Episode: 500   Episode steps: 200   Return: 9.0   smooth: 9.0
+Episode: 550   Episode steps: 200   Return: 61.0  smooth: 61.0
+Episode: 600   Episode steps: 200   Return: 39.0  smooth: 39.0
+Episode: 650   Episode steps: 200   Return: 42.0  smooth: 42.0
+Episode: 700   Episode steps: 200   Return: 79.0  smooth: 79.0
+Episode: 750   Episode steps: 200   Return: 76.0  smooth: 76.0
+Episode: 800   Episode steps: 200   Return: 53.0  smooth: 53.0
+Episode: 850   Episode steps: 200   Return: 53.0  smooth: 53.0
+Episode: 900   Episode steps: 200   Return: 76.0  smooth: 76.0
+Episode: 950   Episode steps: 200   Return: 14.0  smooth: 14.0
+46
+0, rew: 48.2605
+520 [64, 64]
+520 [64, 64]
+520 [64, 64]
+[96 64]
+520 [96 64]
+[64 64]
+520 [64 64]
+520 [64, 64]
+/home/tim/Desktop/myRL/rl/lib/python3.12/site-packages/flexibuddiesrl/DQN.py:570: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  self.Q1.load_state_dict(torch.load(checkpoint_path + "/Q1"))
+Running Episode_Type.RL episodes online: True, episodic: False ms:200000
+Episode: 0     Episode steps: 200   Return: 9.0   smooth: 9.0
+Episode: 50    Episode steps: 200   Return: 20.0  smooth: 20.0
+Episode: 100   Episode steps: 200   Return: 36.0  smooth: 36.0
+Episode: 150   Episode steps: 200   Return: 48.0  smooth: 48.0
+Episode: 200   Episode steps: 200   Return: 46.0  smooth: 46.0
+Episode: 250   Episode steps: 200   Return: 48.0  smooth: 48.0
+Episode: 300   Episode steps: 200   Return: 46.0  smooth: 46.0
+Episode: 350   Episode steps: 200   Return: 128.0 smooth: 128.0
+Episode: 400   Episode steps: 200   Return: 148.0 smooth: 148.0
+Episode: 450   Episode steps: 200   Return: 148.0 smooth: 148.0
+Episode: 500   Episode steps: 200   Return: 12.0  smooth: 12.0
+Episode: 550   Episode steps: 200   Return: 88.0  smooth: 88.0
+Episode: 600   Episode steps: 200   Return: 120.0 smooth: 120.0
+Episode: 650   Episode steps: 200   Return: 148.0 smooth: 148.0
+Episode: 700   Episode steps: 200   Return: 37.0  smooth: 37.0
+Episode: 750   Episode steps: 200   Return: 9.0   smooth: 9.0
+Episode: 800   Episode steps: 200   Return: 9.0   smooth: 9.0
+Episode: 850   Episode steps: 200   Return: 148.0 smooth: 148.0
+Episode: 900   Episode steps: 200   Return: 148.0 smooth: 148.0
+Episode: 950   Episode steps: 200   Return: 148.0 smooth: 148.0
+69
+0, rew: 95.542
+520 [64, 64]
+520 [64, 64]
+520 [64, 64]
+[96 64]
+520 [96 64]
+[64 64]
+520 [64 64]
+[96 64]
+520 [96 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:200000
+Episode: 0     Episode steps: 200   Return: 3.0   smooth: 3.0
+Episode: 50    Episode steps: 200   Return: 19.0  smooth: 19.0
+Episode: 100   Episode steps: 200   Return: 20.0  smooth: 20.0
+Episode: 150   Episode steps: 200   Return: 42.0  smooth: 42.0
+Episode: 200   Episode steps: 200   Return: 9.0   smooth: 9.0
+Episode: 250   Episode steps: 200   Return: 17.0  smooth: 17.0
+Episode: 300   Episode steps: 200   Return: 58.0  smooth: 58.0
+Episode: 350   Episode steps: 200   Return: 28.0  smooth: 28.0
+Episode: 400   Episode steps: 200   Return: 47.0  smooth: 47.0
+Episode: 450   Episode steps: 200   Return: 102.0 smooth: 102.0
+Episode: 500   Episode steps: 200   Return: 73.0  smooth: 73.0
+Episode: 550   Episode steps: 200   Return: 61.0  smooth: 61.0
+Episode: 600   Episode steps: 200   Return: 82.0  smooth: 82.0
+Episode: 650   Episode steps: 200   Return: 82.0  smooth: 82.0
+Episode: 700   Episode steps: 200   Return: 96.0  smooth: 96.0
+Episode: 750   Episode steps: 200   Return: 9.0   smooth: 9.0
+Episode: 800   Episode steps: 200   Return: 73.0  smooth: 73.0
+Episode: 850   Episode steps: 200   Return: 87.0  smooth: 87.0
+Episode: 900   Episode steps: 200   Return: 85.0  smooth: 85.0
+Episode: 950   Episode steps: 200   Return: 82.0  smooth: 82.0
+92
+0, rew: 49.3565
+520 [64, 64]
+520 [64, 64]
+520 [64, 64]
+[96 64]
+520 [96 64]
+[64 64]
+520 [64 64]
+520 [64, 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:200000
+Episode: 0     Episode steps: 200   Return: 17.0  smooth: 17.0
+Episode: 50    Episode steps: 200   Return: 3.0   smooth: 3.0
+Episode: 100   Episode steps: 200   Return: 26.0  smooth: 26.0
+Episode: 150   Episode steps: 200   Return: 9.0   smooth: 9.0
+Episode: 200   Episode steps: 200   Return: 60.0  smooth: 60.0
+Episode: 250   Episode steps: 200   Return: 160.0 smooth: 160.0
+Episode: 300   Episode steps: 200   Return: 154.0 smooth: 154.0
+Episode: 350   Episode steps: 200   Return: 160.0 smooth: 160.0
+Episode: 400   Episode steps: 200   Return: 185.0 smooth: 185.0
+Episode: 450   Episode steps: 200   Return: 160.0 smooth: 160.0
+Episode: 500   Episode steps: 200   Return: 160.0 smooth: 160.0
+Episode: 550   Episode steps: 200   Return: 91.0  smooth: 91.0
+Episode: 600   Episode steps: 200   Return: 160.0 smooth: 160.0
+Episode: 650   Episode steps: 200   Return: 160.0 smooth: 160.0
+Episode: 700   Episode steps: 200   Return: 151.0 smooth: 151.0
+Episode: 750   Episode steps: 200   Return: 157.0 smooth: 157.0
+Episode: 800   Episode steps: 200   Return: 157.0 smooth: 157.0
+Episode: 850   Episode steps: 200   Return: 165.0 smooth: 165.0
+Episode: 900   Episode steps: 200   Return: 185.0 smooth: 185.0
+Episode: 950   Episode steps: 200   Return: 165.0 smooth: 165.0
+115
+0, rew: 122.9585
+520 [64, 64]
+520 [64, 64]
+520 [64, 64]
+[96 64]
+520 [96 64]
+[64 64]
+520 [64 64]
+520 [64, 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:200000
+Episode: 0     Episode steps: 200   Return: 6.0   smooth: 6.0
+Episode: 50    Episode steps: 200   Return: 40.0  smooth: 40.0
+Episode: 100   Episode steps: 200   Return: 54.0  smooth: 54.0
+Episode: 150   Episode steps: 200   Return: 120.0 smooth: 120.0
+Episode: 200   Episode steps: 200   Return: 125.0 smooth: 125.0
+Episode: 250   Episode steps: 200   Return: 37.0  smooth: 37.0
+Episode: 300   Episode steps: 200   Return: 83.0  smooth: 83.0
+Episode: 350   Episode steps: 200   Return: 128.0 smooth: 128.0
+Episode: 400   Episode steps: 200   Return: 128.0 smooth: 128.0
+Episode: 450   Episode steps: 200   Return: 128.0 smooth: 128.0
+Episode: 500   Episode steps: 200   Return: 148.0 smooth: 148.0
+Episode: 550   Episode steps: 200   Return: 128.0 smooth: 128.0
+Episode: 600   Episode steps: 200   Return: 128.0 smooth: 128.0
+Episode: 650   Episode steps: 200   Return: 128.0 smooth: 128.0
+Episode: 700   Episode steps: 200   Return: 128.0 smooth: 128.0
+Episode: 750   Episode steps: 200   Return: 128.0 smooth: 128.0
+Episode: 800   Episode steps: 200   Return: 128.0 smooth: 128.0
+Episode: 850   Episode steps: 200   Return: 128.0 smooth: 128.0
+Episode: 900   Episode steps: 200   Return: 128.0 smooth: 128.0
+Episode: 950   Episode steps: 200   Return: 128.0 smooth: 128.0
+138
+0, rew: 96.658
+520 [64, 64]
+520 [64, 64]
+520 [64, 64]
+[96 64]
+520 [96 64]
+[64 64]
+520 [64 64]
+[96 64]
+520 [96 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:200000
+Episode: 0     Episode steps: 200   Return: 14.0  smooth: 14.0
+Episode: 50    Episode steps: 200   Return: 28.0  smooth: 28.0
+Episode: 100   Episode steps: 200   Return: 25.0  smooth: 25.0
+Episode: 150   Episode steps: 200   Return: 22.0  smooth: 22.0
+Episode: 200   Episode steps: 200   Return: 50.0  smooth: 50.0
+Episode: 250   Episode steps: 200   Return: 39.0  smooth: 39.0
+Episode: 300   Episode steps: 200   Return: 56.0  smooth: 56.0
+Episode: 350   Episode steps: 200   Return: 56.0  smooth: 56.0
+Episode: 400   Episode steps: 200   Return: 28.0  smooth: 28.0
+Episode: 450   Episode steps: 200   Return: 11.0  smooth: 11.0
+Episode: 500   Episode steps: 200   Return: 53.0  smooth: 53.0
+Episode: 550   Episode steps: 200   Return: 33.0  smooth: 33.0
+Episode: 600   Episode steps: 200   Return: 53.0  smooth: 53.0
+Episode: 650   Episode steps: 200   Return: 44.0  smooth: 44.0
+Episode: 700   Episode steps: 200   Return: 70.0  smooth: 70.0
+Episode: 750   Episode steps: 200   Return: 70.0  smooth: 70.0
+Episode: 800   Episode steps: 200   Return: 58.0  smooth: 58.0
+Episode: 850   Episode steps: 200   Return: 105.0 smooth: 105.0
+Episode: 900   Episode steps: 200   Return: 111.0 smooth: 111.0
+Episode: 950   Episode steps: 200   Return: 64.0  smooth: 64.0
+161
+0, rew: 45.814
+520 [64, 64]
+520 [64, 64]
+520 [64, 64]
+[96 64]
+520 [96 64]
+[64 64]
+520 [64 64]
+[96 64]
+520 [96 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:200000
+Episode: 0     Episode steps: 200   Return: 11.0  smooth: 11.0
+Episode: 50    Episode steps: 200   Return: 19.0  smooth: 19.0
+Episode: 100   Episode steps: 200   Return: 6.0   smooth: 6.0
+Episode: 150   Episode steps: 200   Return: 6.0   smooth: 6.0
+Episode: 200   Episode steps: 200   Return: 28.0  smooth: 28.0
+Episode: 250   Episode steps: 200   Return: 39.0  smooth: 39.0
+Episode: 300   Episode steps: 200   Return: 36.0  smooth: 36.0
+Episode: 350   Episode steps: 200   Return: 42.0  smooth: 42.0
+Episode: 400   Episode steps: 200   Return: 51.0  smooth: 51.0
+Episode: 450   Episode steps: 200   Return: 45.0  smooth: 45.0
+Episode: 500   Episode steps: 200   Return: 11.0  smooth: 11.0
+Episode: 550   Episode steps: 200   Return: 39.0  smooth: 39.0
+Episode: 600   Episode steps: 200   Return: 79.0  smooth: 79.0
+Episode: 650   Episode steps: 200   Return: 53.0  smooth: 53.0
+Episode: 700   Episode steps: 200   Return: 47.0  smooth: 47.0
+Episode: 750   Episode steps: 200   Return: 53.0  smooth: 53.0
+Episode: 800   Episode steps: 200   Return: 94.0  smooth: 94.0
+Episode: 850   Episode steps: 200   Return: 73.0  smooth: 73.0
+Episode: 900   Episode steps: 200   Return: 59.0  smooth: 59.0
+Episode: 950   Episode steps: 200   Return: 48.0  smooth: 48.0
+184
+0, rew: 40.4445
+520 [64, 64]
+520 [64, 64]
+520 [64, 64]
+[96 64]
+520 [96 64]
+[64 64]
+520 [64 64]
+520 [64, 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:200000
+Episode: 0     Episode steps: 200   Return: 12.0  smooth: 12.0
+Episode: 50    Episode steps: 200   Return: 45.0  smooth: 45.0
+Episode: 100   Episode steps: 200   Return: 9.0   smooth: 9.0
+Episode: 150   Episode steps: 200   Return: 9.0   smooth: 9.0
+Episode: 200   Episode steps: 200   Return: 11.0  smooth: 11.0
+Episode: 250   Episode steps: 200   Return: 40.0  smooth: 40.0
+Episode: 300   Episode steps: 200   Return: 43.0  smooth: 43.0
+Episode: 350   Episode steps: 200   Return: 54.0  smooth: 54.0
+Episode: 400   Episode steps: 200   Return: 54.0  smooth: 54.0
+Episode: 450   Episode steps: 200   Return: 46.0  smooth: 46.0
+Episode: 500   Episode steps: 200   Return: 80.0  smooth: 80.0
+Episode: 550   Episode steps: 200   Return: 14.0  smooth: 14.0
+Episode: 600   Episode steps: 200   Return: 83.0  smooth: 83.0
+Episode: 650   Episode steps: 200   Return: 6.0   smooth: 6.0
+Episode: 700   Episode steps: 200   Return: 120.0 smooth: 120.0
+Episode: 750   Episode steps: 200   Return: 120.0 smooth: 120.0
+Episode: 800   Episode steps: 200   Return: 117.0 smooth: 117.0
+Episode: 850   Episode steps: 200   Return: 148.0 smooth: 148.0
+Episode: 900   Episode steps: 200   Return: 46.0  smooth: 46.0
+Episode: 950   Episode steps: 200   Return: 3.0   smooth: 3.0
+16
+0, rew: 53.1765
+520 [64, 64]
+520 [64, 64]
+520 [64, 64]
+[96 64]
+520 [96 64]
+[64 64]
+520 [64 64]
+520 [64, 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:200000
+Episode: 0     Episode steps: 200   Return: 43.0  smooth: 43.0
+Episode: 50    Episode steps: 200   Return: 12.0  smooth: 12.0
+Episode: 100   Episode steps: 200   Return: 12.0  smooth: 12.0
+Episode: 150   Episode steps: 200   Return: 12.0  smooth: 12.0
+Episode: 200   Episode steps: 200   Return: 17.0  smooth: 17.0
+Episode: 250   Episode steps: 200   Return: 91.0  smooth: 91.0
+Episode: 300   Episode steps: 200   Return: 54.0  smooth: 54.0
+Episode: 350   Episode steps: 200   Return: 148.0 smooth: 148.0
+Episode: 400   Episode steps: 200   Return: 154.0 smooth: 154.0
+Episode: 450   Episode steps: 200   Return: 128.0 smooth: 128.0
+Episode: 500   Episode steps: 200   Return: 148.0 smooth: 148.0
+Episode: 550   Episode steps: 200   Return: 125.0 smooth: 125.0
+Episode: 600   Episode steps: 200   Return: 154.0 smooth: 154.0
+Episode: 650   Episode steps: 200   Return: 151.0 smooth: 151.0
+Episode: 700   Episode steps: 200   Return: 123.0 smooth: 123.0
+Episode: 750   Episode steps: 200   Return: 128.0 smooth: 128.0
+Episode: 800   Episode steps: 200   Return: 154.0 smooth: 154.0
+Episode: 850   Episode steps: 200   Return: 154.0 smooth: 154.0
+Episode: 900   Episode steps: 200   Return: 154.0 smooth: 154.0
+Episode: 950   Episode steps: 200   Return: 148.0 smooth: 148.0
+39
+0, rew: 97.603
+520 [64, 64]
+520 [64, 64]
+520 [64, 64]
+[96 64]
+520 [96 64]
+[64 64]
+520 [64 64]
+520 [64, 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:200000
+Episode: 0     Episode steps: 200   Return: 14.0  smooth: 14.0
+Episode: 50    Episode steps: 200   Return: 25.0  smooth: 25.0
+Episode: 100   Episode steps: 200   Return: 39.0  smooth: 39.0
+Episode: 150   Episode steps: 200   Return: 55.0  smooth: 55.0
+Episode: 200   Episode steps: 200   Return: 14.0  smooth: 14.0
+Episode: 250   Episode steps: 200   Return: 33.0  smooth: 33.0
+Episode: 300   Episode steps: 200   Return: 17.0  smooth: 17.0
+Episode: 350   Episode steps: 200   Return: 64.0  smooth: 64.0
+Episode: 400   Episode steps: 200   Return: 55.0  smooth: 55.0
+Episode: 450   Episode steps: 200   Return: 33.0  smooth: 33.0
+Episode: 500   Episode steps: 200   Return: 58.0  smooth: 58.0
+Episode: 550   Episode steps: 200   Return: 47.0  smooth: 47.0
+Episode: 600   Episode steps: 200   Return: 55.0  smooth: 55.0
+Episode: 650   Episode steps: 200   Return: 58.0  smooth: 58.0
+Episode: 700   Episode steps: 200   Return: 58.0  smooth: 58.0
+Episode: 750   Episode steps: 200   Return: 70.0  smooth: 70.0
+Episode: 800   Episode steps: 200   Return: 58.0  smooth: 58.0
+Episode: 850   Episode steps: 200   Return: 9.0   smooth: 9.0
+Episode: 900   Episode steps: 200   Return: 58.0  smooth: 58.0
+Episode: 950   Episode steps: 200   Return: 58.0  smooth: 58.0
+62
+0, rew: 46.2415
+520 [64, 64]
+520 [64, 64]
+520 [64, 64]
+[96 64]
+520 [96 64]
+[64 64]
+520 [64 64]
+520 [64, 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:200000
+Episode: 0     Episode steps: 200   Return: 17.0  smooth: 17.0
+Episode: 50    Episode steps: 200   Return: 37.0  smooth: 37.0
+Episode: 100   Episode steps: 200   Return: 20.0  smooth: 20.0
+Episode: 150   Episode steps: 200   Return: 20.0  smooth: 20.0
+Episode: 200   Episode steps: 200   Return: 34.0  smooth: 34.0
+Episode: 250   Episode steps: 200   Return: 51.0  smooth: 51.0
+Episode: 300   Episode steps: 200   Return: 45.0  smooth: 45.0
+Episode: 350   Episode steps: 200   Return: 42.0  smooth: 42.0
+Episode: 400   Episode steps: 200   Return: 65.0  smooth: 65.0
+Episode: 450   Episode steps: 200   Return: 65.0  smooth: 65.0
+Episode: 500   Episode steps: 200   Return: 59.0  smooth: 59.0
+Episode: 550   Episode steps: 200   Return: 68.0  smooth: 68.0
+Episode: 600   Episode steps: 200   Return: 42.0  smooth: 42.0
+Episode: 650   Episode steps: 200   Return: 59.0  smooth: 59.0
+Episode: 700   Episode steps: 200   Return: 45.0  smooth: 45.0
+Episode: 750   Episode steps: 200   Return: 51.0  smooth: 51.0
+Episode: 800   Episode steps: 200   Return: 28.0  smooth: 28.0
+Episode: 850   Episode steps: 200   Return: 85.0  smooth: 85.0
+Episode: 900   Episode steps: 200   Return: 65.0  smooth: 65.0
+Episode: 950   Episode steps: 200   Return: 70.0  smooth: 70.0
+85
+0, rew: 50.377
+520 [64, 64]
+520 [64, 64]
+520 [64, 64]
+[96 64]
+520 [96 64]
+[64 64]
+520 [64 64]
+520 [64, 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:200000
+Episode: 0     Episode steps: 200   Return: 46.0  smooth: 46.0
+Episode: 50    Episode steps: 200   Return: 43.0  smooth: 43.0
+Episode: 100   Episode steps: 200   Return: 83.0  smooth: 83.0
+Episode: 150   Episode steps: 200   Return: 12.0  smooth: 12.0
+Episode: 200   Episode steps: 200   Return: 9.0   smooth: 9.0
+Episode: 250   Episode steps: 200   Return: 148.0 smooth: 148.0
+Episode: 300   Episode steps: 200   Return: 148.0 smooth: 148.0
+Episode: 350   Episode steps: 200   Return: 120.0 smooth: 120.0
+Episode: 400   Episode steps: 200   Return: 148.0 smooth: 148.0
+Episode: 450   Episode steps: 200   Return: 160.0 smooth: 160.0
+Episode: 500   Episode steps: 200   Return: 160.0 smooth: 160.0
+Episode: 550   Episode steps: 200   Return: 148.0 smooth: 148.0
+Episode: 600   Episode steps: 200   Return: 9.0   smooth: 9.0
+Episode: 650   Episode steps: 200   Return: 148.0 smooth: 148.0
+Episode: 700   Episode steps: 200   Return: 148.0 smooth: 148.0
+Episode: 750   Episode steps: 200   Return: 111.0 smooth: 111.0
+Episode: 800   Episode steps: 200   Return: 157.0 smooth: 157.0
+Episode: 850   Episode steps: 200   Return: 148.0 smooth: 148.0
+Episode: 900   Episode steps: 200   Return: 157.0 smooth: 157.0
+Episode: 950   Episode steps: 200   Return: 157.0 smooth: 157.0
+108
+0, rew: 113.573
+520 [64, 64]
+520 [64, 64]
+520 [64, 64]
+[96 64]
+520 [96 64]
+[64 64]
+520 [64 64]
+520 [64, 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:200000
+Episode: 0     Episode steps: 200   Return: 25.0  smooth: 25.0
+Episode: 50    Episode steps: 200   Return: 9.0   smooth: 9.0
+Episode: 100   Episode steps: 200   Return: 3.0   smooth: 3.0
+Episode: 150   Episode steps: 200   Return: 3.0   smooth: 3.0
+Episode: 200   Episode steps: 200   Return: 77.0  smooth: 77.0
+Episode: 250   Episode steps: 200   Return: 111.0 smooth: 111.0
+Episode: 300   Episode steps: 200   Return: 83.0  smooth: 83.0
+Episode: 350   Episode steps: 200   Return: 111.0 smooth: 111.0
+Episode: 400   Episode steps: 200   Return: 117.0 smooth: 117.0
+Episode: 450   Episode steps: 200   Return: 114.0 smooth: 114.0
+Episode: 500   Episode steps: 200   Return: 111.0 smooth: 111.0
+Episode: 550   Episode steps: 200   Return: 91.0  smooth: 91.0
+Episode: 600   Episode steps: 200   Return: 120.0 smooth: 120.0
+Episode: 650   Episode steps: 200   Return: 123.0 smooth: 123.0
+Episode: 700   Episode steps: 200   Return: 49.0  smooth: 49.0
+Episode: 750   Episode steps: 200   Return: 128.0 smooth: 128.0
+Episode: 800   Episode steps: 200   Return: 128.0 smooth: 128.0
+Episode: 850   Episode steps: 200   Return: 128.0 smooth: 128.0
+Episode: 900   Episode steps: 200   Return: 123.0 smooth: 123.0
+Episode: 950   Episode steps: 200   Return: 128.0 smooth: 128.0
+131
+0, rew: 92.2465
+
+
+loading ./PaperExperiment/Overcooked/algo_PPO/model_checkpoints/r_40_supregFalse_0
+[96 64]
+520 [96 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:2600
+Episode: 0     Episode steps: 200   Return: 33.0  smooth: 33.0
+0/196
+[28.03846154  0.          0.          0.          0.          0.
+  0.          0.          0.          0.          0.          0.
+  0.          0.        ]
+
+
+loading ./PaperExperiment/Overcooked/algo_PPO/model_checkpoints/r_80_supregFalse_0
+[96 64]
+520 [96 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:2600
+Episode: 0     Episode steps: 200   Return: 99.0  smooth: 99.0
+1/196
+[28.03846154 41.76923077  0.          0.          0.          0.
+  0.          0.          0.          0.          0.          0.
+  0.          0.        ]
+
+
+loading ./PaperExperiment/Overcooked/algo_PPO/model_checkpoints/r_100_supregFalse_0
+[96 64]
+520 [96 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:2600
+Episode: 0     Episode steps: 200   Return: 9.0   smooth: 9.0
+2/196
+[28.03846154 41.76923077 12.69230769  0.          0.          0.
+  0.          0.          0.          0.          0.          0.
+  0.          0.        ]
+
+
+loading ./PaperExperiment/Overcooked/algo_PPO/model_checkpoints/r_40_supregFalse_1
+[96 64]
+520 [96 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:2600
+Episode: 0     Episode steps: 200   Return: 12.0  smooth: 12.0
+3/196
+[28.03846154 41.76923077 12.69230769 28.69230769  0.          0.
+  0.          0.          0.          0.          0.          0.
+  0.          0.        ]
+
+
+loading ./PaperExperiment/Overcooked/algo_PPO/model_checkpoints/r_80_supregFalse_1
+[96 64]
+520 [96 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:2600
+Episode: 0     Episode steps: 200   Return: 6.0   smooth: 6.0
+4/196
+[28.03846154 41.76923077 12.69230769 28.69230769  7.76923077  0.
+  0.          0.          0.          0.          0.          0.
+  0.          0.        ]
+
+
+loading ./PaperExperiment/Overcooked/algo_PPO/model_checkpoints/r_100_supregFalse_1
+[96 64]
+520 [96 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:2600
+Episode: 0     Episode steps: 200   Return: 3.0   smooth: 3.0
+5/196
+[28.03846154 41.76923077 12.69230769 28.69230769  7.76923077  4.26923077
+  0.          0.          0.          0.          0.          0.
+  0.          0.        ]
+
+
+loading ./PaperExperiment/Overcooked/algo_PPO/model_checkpoints/r_180.2279027305405_supregFalse_1
+[96 64]
+520 [96 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:2600
+Episode: 0     Episode steps: 200   Return: 46.0  smooth: 46.0
+6/196
+[28.03846154 41.76923077 12.69230769 28.69230769  7.76923077  4.26923077
+ 16.30769231  0.          0.          0.          0.          0.
+  0.          0.        ]
+
+
+loading ./PaperExperiment/Overcooked/algo_MDQ/model_checkpoints/r_40_supregFalse_0
+520 [64, 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:2600
+Episode: 0     Episode steps: 200   Return: 34.0  smooth: 34.0
+7/196
+[28.03846154 41.76923077 12.69230769 28.69230769  7.76923077  4.26923077
+ 16.30769231 13.46153846  0.          0.          0.          0.
+  0.          0.        ]
+
+
+loading ./PaperExperiment/Overcooked/algo_MDQ/model_checkpoints/r_80_supregFalse_0
+520 [64, 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:2600
+Episode: 0     Episode steps: 200   Return: 100.0 smooth: 100.0
+8/196
+[28.03846154 41.76923077 12.69230769 28.69230769  7.76923077  4.26923077
+ 16.30769231 13.46153846 88.88461538  0.          0.          0.
+  0.          0.        ]
+
+
+loading ./PaperExperiment/Overcooked/algo_MDQ/model_checkpoints/r_100_supregFalse_0
+520 [64, 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:2600
+Episode: 0     Episode steps: 200   Return: 6.0   smooth: 6.0
+9/196
+[28.03846154 41.76923077 12.69230769 28.69230769  7.76923077  4.26923077
+ 16.30769231 13.46153846 88.88461538  5.34615385  0.          0.
+  0.          0.        ]
+
+
+loading ./PaperExperiment/Overcooked/algo_MDQ/model_checkpoints/r_40_supregFalse_1
+520 [64, 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:2600
+Episode: 0     Episode steps: 200   Return: 25.0  smooth: 25.0
+10/196
+[28.03846154 41.76923077 12.69230769 28.69230769  7.76923077  4.26923077
+ 16.30769231 13.46153846 88.88461538  5.34615385 38.30769231  0.
+  0.          0.        ]
+
+
+loading ./PaperExperiment/Overcooked/algo_MDQ/model_checkpoints/r_80_supregFalse_1
+520 [64, 64]
+Running Episode_Type.RL episodes online: True, episodic: False ms:2600
+Episode: 0     Episode steps: 200   Return: 37.0  smooth: 37.0
+11/196
+[28.03846154 41.76923077 12.69230769 28.69230769  7.76923077  4.26923077
+ 16.30769231 13.46153846 88.88461538  5.34615385 38.30769231 54.26923077
+  0.          0.        ]
