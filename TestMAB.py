@@ -87,6 +87,7 @@ def actions_match(
     n_same_actions_required: int = 1,
     advantage_type="gae",
     gae_lambda=0.98,
+    stubborn=False,
 ):
     with torch.no_grad():
         if verbose:
@@ -135,6 +136,13 @@ def actions_match(
                     n_same_actions_required=n_same_actions_required,
                     gae_lambda=gae_lambda,
                 )
+                # print(adv)
+                # print(match_modules[agent_id].listener.alphas)
+                # print(match_modules[agent_id].listener.betas)
+                # print(match_modules[agent_id].selected)
+                # print(match_modules[agent_id].listener.mu)
+                # print(adv)
+
                 if share_listener_rewards:
                     arm_bool = arms > 0
                 else:
@@ -150,6 +158,9 @@ def actions_match(
                     print(
                         f"  a_id: \n  {agent_id}\n  adv: \n  {adv},\n arms: \n  {arms}\n  speaker adv: \n  {speaker_adv[:, agent_id]}"
                     )
+            # print("updated matches")
+            # input(f"update step: {current_step}")
+
             augmented_targets = command_targets.copy()
             for agent_id in range(n_agents):
                 augmented_targets[agent_id, agent_id] = 1
@@ -171,9 +182,10 @@ def actions_match(
             for agent_id in range(n_agents):
                 # Get the command targets from each agent 'agent_id'
                 command_targets[agent_id] = match_modules[agent_id].choose_target(
-                    prior=priors[agent_id], available_teammates=np.ones(n_agents)
+                    prior=priors[agent_id],
+                    available_teammates=np.ones(n_agents),
+                    stubborn=stubborn and agent_id == 0,
                 )
-
                 # Get the command contents for each agent
                 for target in range(n_agents):
                     if target == agent_id or command_targets[agent_id, target] > 0:
@@ -211,6 +223,7 @@ def actions_match(
                     commanded_by=options,
                     prior=None,
                     told_to=command_contents[:, agent_id].copy().flatten(),
+                    stubborn=stubborn and agent_id == 0,
                 )
                 if verbose:
                     print(
@@ -289,10 +302,11 @@ def run_multi_agent_episodes(
     online=False,
     verbose=False,
     save_models=False,
-    match_lambda=0.9,
-    match_gamma=0.9,
+    match_lambda=0.97,
+    match_gamma=0.99,
     gae_lambda=0.90,
     match_adv_type="gae",
+    stubborn=False,
 ):
     print(
         f"Running {episode_type} episodes online: {online}, episodic: {episodic} ms:{max_steps}"
@@ -365,6 +379,7 @@ def run_multi_agent_episodes(
                     n_same_actions_required=1,
                     advantage_type=match_adv_type,
                     gae_lambda=gae_lambda,
+                    stubborn=stubborn,
                 )
                 current_command_step = current_command_step % n_step
                 # print(current_command_step)
@@ -415,7 +430,7 @@ def run_multi_agent_episodes(
                 inds = np.arange(n_agents)
                 np.random.shuffle(inds)
                 # if episodic:
-                if online and memory.steps_recorded > 999:
+                if online and memory.steps_recorded > 256:
                     exp = memory.sample_transitions(
                         as_torch=True,
                         device=device,
@@ -425,6 +440,7 @@ def run_multi_agent_episodes(
                         aloss, closs = models[agent_id].reinforcement_learn(
                             batch=exp, agent_num=agent_id
                         )
+                        # print("rl")
                     memory.reset()
                     loss_hist[-1] += closs
 
@@ -581,7 +597,7 @@ def get_agent(obs, args, device, n_actions):
             discrete_action_dims=[n_actions],
             hidden_dims=[64, 64],
             device=device,
-            lr=1e-4,
+            lr=1e-3,
             activation="relu",
             dueling=True,
             n_c_action_bins=0,
@@ -595,22 +611,22 @@ def get_agent(obs, args, device, n_actions):
             hidden_dims=np.array([96, 64]),
             # min_actions=continuous_env.action_space.low,
             # max_actions=continuous_env.action_space.high,
-            gamma=0.977,
+            gamma=0.99,
             device=device,
-            entropy_loss=0.001,
-            mini_batch_size=256,
+            entropy_loss=0.01,
+            mini_batch_size=16,
             n_epochs=4,
-            lr=1e-3,
+            lr=1e-4,
             advantage_type="gae",
             norm_advantages=True,
             anneal_lr=2000000,
-            value_loss_coef=0.05,
-            ppo_clip=0.15,
+            value_loss_coef=0.5,
+            ppo_clip=0.2,
             # value_clip=0.5,
             orthogonal=True,
             activation="tanh",
             starting_actorlogstd=0,
-            gae_lambda=0.8,
+            gae_lambda=0.98,
         ),
         "PG": PG(
             obs_dim=obs.shape[1],
@@ -731,12 +747,16 @@ def organize_models(args):
     model_dirs = []
     graph_names = []
     algos = []
-    print(res_paths)
-    print(dir_lists)
-    input("hmm")
+    # print(res_paths)
+    # print(dir_lists)
+    # print(graph_names)
+    # input("hmm")
     for i, rp in enumerate(res_paths):
         for d in dir_lists[i]:
             # if d[-1] != "0":
+            # print(d[2:6].replace("_", ""))
+            # if float(d[2:6].replace("_", "")) <= 0.7:
+            #    continue
             # print(d[2:6].replace("_", ""))
             # if float(d[2:6].replace("_", "")) <= 0.7:
             #    continue
@@ -754,8 +774,11 @@ def organize_models(args):
     for md in graph_names:
         print(md)
         print(md[8:11])
-        print(float(md[2:5]) + (1000 if md[8:11] == "MDQ" else 0))
+        print(md[2:5])
+        print(md[8:11])
+        print(float(md[2:5].replace("_", "")) + (1000 if md[8:11] == "MDQ" else 0))
 
+    if False:
     if False:
         model_dirs = [
             x
@@ -819,6 +842,15 @@ if __name__ == "__main__":
     parser.add_argument("-nst", "--n_step", action="store", default=0)
     parser.add_argument("-rls", "--rlsteps", action="store", default=0)
     parser.add_argument("-g", "--graph", action="store_true")
+    parser.add_argument("-match", "--use_match", action="store_true")
+    parser.add_argument("-stubborn", "--stubborn", action="store_true")
+    parser.add_argument(
+        "-adv",
+        "--advantage_type",
+        action="store",
+        choices=["gae", "monte", "td"],
+    )
+    parser.add_argument("-rlres", "--rlresponse", action="store_true")
     parser.add_argument(
         "-cuda", "--cuda_device", action="store", choices=["cuda:0", "cuda:1", "cpu"]
     )
@@ -839,7 +871,7 @@ if __name__ == "__main__":
         "ttt_roles": "TTTRoles",
         "ttt_lever": "TTTLever",
     }
-    results_path = "./PaperExperiment/"
+    results_path = "./PaperExperiment/" + f"{arg_to_env_str[args.env]}/"
 
     env, n_actions, n_agents, results_path, obs, reward_bin = get_env(
         args, results_path
@@ -878,14 +910,100 @@ if __name__ == "__main__":
             "global_auxiliary_rewards": (None, np.float32),
         },
     )
+
+    pretrain_to_pop = False
+    if pretrain_to_pop:
+        response_agents = []
+        # mdqn [-0.21188628 -0.29584076 -0.20894605 -0.75678952 -0.51931076 -0.55947318 -0.35839677 -0.11089039  0.06327153 -0.97824456 -0.97715295 -0.44132854]
+        # PPO  [-0.12306626  0.14277359  0.01765025 -1.         -1.         -1.         -0.40717958 -0.40405242 -0.12772761 -1.         -1.         -1.        ]
+        # PPO specific [-0.02451197  0.01145004  0.25451705  0.03941464 -0.09084617  0.1024813 -0.3901283   0.07405521 -0.05561576 -0.17317132  0.0625719   0.06208748]
+        # MDQ specific [-0.35981497  0.07939706  0.36643528 -0.24241677 -0.00585408  0.55788737 0.06444411  0.38679748  0.44089022 -0.0434205  -0.07143315  0.55579378]
+        alg = "PPO"
+        for r in range(len(model_dirs)):
+            a1 = get_agent(obs, args, device, n_actions)[alg]
+            a1.mini_batch_size = 64
+            response_agents.append(a1)
+            # for j in range(100000 // 100):
+            # r = np.random.randint(0, len(model_dirs))
+            # r = 8
+            # print(f"\n\nloading {model_dirs[r]}")
+            a2: Agent = the_agents2[algos[r]]
+            a2.load(model_dirs[r] + "/")
+            a2.eval_mode = True
+            rew, er, hl = run_multi_agent_episodes(
+                env=env,
+                models=[a1, a2],
+                n_agents=2,
+                episode_type=Episode_Type.RL,
+                memory=mem,
+                imitation_memory=mem,
+                max_steps=120000,
+                n_shot=int(args.n_shot),
+                n_step=int(args.n_step),
+                save_models=False,
+                online=alg == "PPO",
+                episodic=False,
+                use_match=False,
+                # match_adv_type=args.advantage_type,
+                # stubborn=args.stubborn,
+            )
+            # print(f"{j}, rew: {rew.mean()}")
+        for j in range(len(model_dirs)):
+            print(f"\n\nloading {model_dirs[j]}")
+            a1 = response_agents[j]
+            a1.eval_mode = True
+            a2: Agent = the_agents2[algos[j]]
+            a2.load(model_dirs[j] + "/")
+            a2.eval_mode = True
+
+            rew, er, hl = run_multi_agent_episodes(
+                env=env,
+                models=[a1, a2],
+                n_agents=2,
+                episode_type=Episode_Type.RL,
+                memory=mem,
+                imitation_memory=mem,
+                max_steps=500,
+                n_shot=int(args.n_shot),
+                n_step=int(args.n_step),
+                save_models=False,
+                online=True,
+                episodic=False,
+                use_match=False,
+                match_adv_type=args.advantage_type,
+                stubborn=args.stubborn,
+            )
+            nshot = int(args.n_shot)
+            rew = np.array(rew)
+            mean_scores[0, j] = rew.mean()
+            # print(rew)
+            # print(
+            #    f"arangemod: {np.arange(rew.shape[0]) % nshot}, {nshot - 1}: {rew[(np.arange(rew.shape[0]) % nshot) == (nshot - 1)]}"
+            # )
+            last_scores[0, j] = rew[
+                (np.arange(rew.shape[0]) % nshot) == (nshot - 1)
+            ].mean()
+            print(f"{0*len(model_dirs)+j}/{len(model_dirs)**2}")
+
+            ep_rew_avg = np.zeros((nshot))
+            for k in range(rew.shape[0] // nshot):
+                # plt.plot(rew[k * nshot : (k + 1) * nshot])
+                ep_rew_avg += rew[k * nshot : (k + 1) * nshot]
+            ep_rew_avg /= rew.shape[0] // nshot
+            print(mean_scores[0])
+
+    if pretrain_to_pop:
+        exit()
+
     for i in range(len(model_dirs)):
         for j in range(0, len(model_dirs)):
-            print(model_dirs)
+            # print(model_dirs)
             print(i, ",", j)
             print(f"\n\nloading {model_dirs[i]}")
             a1: Agent = the_agents[algos[i]]  # fix this
             a1.load(model_dirs[i] + "/")
-            a1.eval_mode = True
+            a1.eval_mode = args.rlresponse
+            a1.mini_batch_size = 16
             print(f"\n\nloading {model_dirs[j]}")
             a2: Agent = the_agents2[algos[j]]
             a2.load(model_dirs[j] + "/")
@@ -928,11 +1046,20 @@ if __name__ == "__main__":
 
             ep_rew_avg = np.zeros((nshot))
             for k in range(rew.shape[0] // nshot):
+                # plt.plot(rew[k * nshot : (k + 1) * nshot])
                 ep_rew_avg += rew[k * nshot : (k + 1) * nshot]
             ep_rew_avg /= rew.shape[0] // nshot
-            plt.plot(ep_rew_avg)
-            plt.show()
+            # plt.plot(ep_rew_avg)
+            # plt.show()
 
+    np.save(
+        f"./overcookedscores/match_{args.use_match}_mean_score_{nshot}_{args.n_step}_{args.advantage_type}_{args.stubborn}",
+        mean_scores,
+    )
+    np.save(
+        f"./overcookedscores/match_{args.use_match}_last_score_{nshot}_{args.n_step}_{args.advantage_type}_{args.stubborn}",
+        mean_scores,
+    )
     np.save(f"new_match_mean_score1_{args.n_shot}_{args.n_step}", mean_scores)
     np.save(f"new_match_last_score1_{args.n_shot}_{args.n_step}", mean_scores)
     # Set ticks and labels
@@ -947,7 +1074,9 @@ if __name__ == "__main__":
 
         # Rotate the x-tick labels for better readability
         fig.colorbar(im, ax=ax)
-        plt.title("Mean Scores of different paired agents")
+        plt.title(
+            f"Mean Scores of {'stubborn' if args.stubborn else ''} match: {args.use_match}, nshot {nshot}, nstep {args.n_step} adv {args.advantage_type}"
+        )
         plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
         plt.show()
 
@@ -959,8 +1088,15 @@ if __name__ == "__main__":
         ax.set_yticklabels(graph_names)
 
         # Rotate the x-tick labels for better readability
-        fig.colorbar(im, ax=ax)
-        plt.title("Last Scores of different paired agents")
+        # set color bar max to 1 and min to -1
+        im.set_clim(-1, 1)
+        fig.colorbar(
+            im,
+            ax=ax,
+        )
+        plt.title(
+            f"Last Scores of {'stubborn' if args.stubborn else ''} match: {args.use_match}, nshot {nshot}, nstep {args.n_step} adv {args.advantage_type}"
+        )
         plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
         plt.show()
     exit()
