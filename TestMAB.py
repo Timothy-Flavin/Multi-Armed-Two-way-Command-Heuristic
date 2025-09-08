@@ -759,6 +759,9 @@ def organize_models(args):
             # print(d[2:6].replace("_", ""))
             # if float(d[2:6].replace("_", "")) <= 0.7:
             #    continue
+            # print(d[2:6].replace("_", ""))
+            # if float(d[2:6].replace("_", "")) <= 0.7:
+            #    continue
             # if d[-1] != "0":
             # continue
             # print(d)
@@ -777,6 +780,7 @@ def organize_models(args):
         print(md[8:11])
         print(float(md[2:5].replace("_", "")) + (1000 if md[8:11] == "MDQ" else 0))
 
+    if False:
     if False:
         model_dirs = [
             x
@@ -863,6 +867,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     model_fams = ["PPO", "MDQ"]
+    args = parser.parse_args()
+
 
     reward_bin = []
     arg_to_env_str = {
@@ -1066,7 +1072,10 @@ if __name__ == "__main__":
                 episode_type=Episode_Type.RL,
                 memory=mem,
                 imitation_memory=mem,
-                max_steps=int(args.n_shot) * 200 * 10,
+                max_steps=(
+                    10 if args.env not in ["ttt", "ttt_roles", "ttt_lever"] else 5
+                )
+                * 400,
                 n_shot=int(args.n_shot),
                 n_step=int(args.n_step),
                 save_models=False,
@@ -1106,6 +1115,8 @@ if __name__ == "__main__":
         f"./overcookedscores/match_{args.use_match}_last_score_{nshot}_{args.n_step}_{args.advantage_type}_{args.stubborn}",
         mean_scores,
     )
+    np.save(f"new_match_mean_score1_{args.n_shot}_{args.n_step}", mean_scores)
+    np.save(f"new_match_last_score1_{args.n_shot}_{args.n_step}", mean_scores)
     # Set ticks and labels
 
     if args.graph:

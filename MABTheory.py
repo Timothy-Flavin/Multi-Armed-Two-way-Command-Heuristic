@@ -4,6 +4,7 @@ from scipy.stats import invgamma, norm
 import matplotlib.pyplot as plt
 from flexibuff import FlexibleBuffer
 from flexibuddiesrl import Agent
+from matplotlib.lines import Line2D
 
 
 class MAB_Sampler(ABC):
@@ -252,7 +253,7 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
         beta_0=2.5,
         lambda_=0.99,
         gamma=0.99,
-        bg_learning_rate=0.95,
+        bg_learning_rate=0.90,
         prob_weight_arms=True,
         min_arm_prob=0.1,
         n_explore=5,
@@ -296,7 +297,7 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
                 1 - self.bg_learning_rate
             ) * available_teammates
             self.arm_avail_probs = np.maximum(self.arm_avail_probs, self.min_arm_prob)
-        # print(self.arm_avail_probs, " avail")
+        # print(self.arm_avail_probs, " avail", available_teammates)
         # input()
         sampled_means = np.zeros(self.num_arms)
         for a in range(self.num_arms):
@@ -306,6 +307,7 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
             # x = np.arange(0, 5, 0.001)
             # R = invgamma.pdf(x, a=self.alphas[a], scale=self.betas[a] + 1)
             sampled_means[a] = norm.rvs(loc=self.mu[a], scale=sigma_sq)
+            # print(f"sigma: {sigma_sq}")
         # print(sampled_means)
         # print(available_teammates)
         scores = sampled_means - (1 - available_teammates) * 1e10
@@ -325,6 +327,7 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
 
         self.alphas *= self.gamma  # TODO cant shrink past 1, also this feels wrong
         self.betas *= self.gamma
+
         # print(f"arms pulled before: {arms_pulled}")
         arms_pulled = np.array(arms_pulled).astype(bool)
         for i in range(self.num_arms):
@@ -338,7 +341,9 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
         # print(
         #    f"advantage: {advantage}, arms pulled: {arms_pulled}, arm probs: {self.arm_avail_probs}"
         # )
-        muscale = min(
+        # print(self.lambda_)
+        # print()
+        muscale = np.minimum(
             (1 - self.lambda_) / self.arm_avail_probs[arms_pulled],
             (1 - self.lambda_) * 5,
         )
@@ -354,8 +359,13 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
         prev_mu = self.mu[arms_pulled]
         self.mu[arms_pulled] = (1 - muscale) * prev_mu + muscale * advantage
         self.alphas[arms_pulled] += 0.5 / self.arm_avail_probs[arms_pulled]
-        self.betas[arms_pulled] += (
-            0.5 * (advantage - prev_mu) ** 2 / self.arm_avail_probs[arms_pulled]
+        # print(
+        #    f"adv-pmu: {advantage - prev_mu}, arm prob: {self.arm_avail_probs[arms_pulled]}"
+        # )
+        # print(self.arm_avail_probs)
+        self.betas[arms_pulled] = (1 - muscale) * self.betas[arms_pulled] + (
+            muscale
+            * ((advantage - prev_mu) ** 2)  # / self.arm_avail_probs[arms_pulled]
         )
         self.ns[arms_pulled] += 1  # Increment only for pulled arm
 
@@ -368,6 +378,106 @@ class Thompson_Gaussian_Sleepy(MAB_Sampler):
         mystr += f"\n  alphas: {self.alphas}"
         mystr += f"\n  betas: {self.betas}"
         return mystr
+
+
+class Thompson_Gaussian_Sleepy2(MAB_Sampler):
+    def __init__(
+        self,
+        n_agents,
+        prior_strength=1,
+        experience_strength=1,
+        id=0,
+        mu_0=0,
+        n_0=1,
+        alpha_0=1e-3,
+        beta_0=1e-3,
+        lambda_=0.99,
+        gamma=0.99,
+        bg_learning_rate=0.90,
+        prob_weight_arms=True,
+        min_arm_prob=0.01,
+        n_explore=5,
+        kappa0=1e-3,
+        m0=1e-3,
+    ):
+        self.n_agents = n_agents
+        self.gamma = gamma
+        self.ns = np.ones(n_agents)
+        self.mu = np.zeros(n_agents)
+        self.arm_avails = np.ones(n_agents)
+        self.last_available_teammates = np.ones(n_agents)
+        self.r = np.zeros(n_agents)
+        self.r_squared = np.ones(n_agents)
+        self.mu0 = mu_0
+        self.alpha0 = alpha_0
+        self.beta0 = beta_0
+        self.min_arm_prob = min_arm_prob
+        self.kappa0 = kappa0
+        self.id = id
+        self.m0 = m0
+
+        pass
+
+    def choose(self, available_teammates, prior=None):
+        self.last_available_teammates = available_teammates.copy()
+        # means and variances per arm
+        means = self.r / self.ns
+        self.mu = means.copy()
+        # print(f"means: {means}")
+        variances = (self.r_squared - (self.ns * (means**2))) / np.maximum(
+            self.ns - 1, 1.0
+        )
+        # print(f"variances: {variances}")
+        # kappa_n and m_n alpha_n beta_n per arm
+        kappa_n = self.kappa0 + self.ns
+        m_n = (self.kappa0 * self.m0 + self.ns * means) / kappa_n
+        alpha_n = self.alpha0 + self.ns / 2
+        # beta_n = self.beta0+0.5*((self.ns-1)*np.maximum(variances,0.0) + self.kappa0*self.ns) /
+        beta_n = self.beta0 + 0.5 * (
+            (self.ns - 1) * np.maximum(variances, 0.0001)
+            + (self.kappa0 * self.ns) / kappa_n * (means - self.m0) ** 2
+        )
+
+        # print(f"kappa: {kappa_n}, m_n: {m_n}, alpha_n: {alpha_n}, beta_n: {beta_n}")
+
+        sigma2 = invgamma.rvs(alpha_n, scale=beta_n)
+        self.private_std_mean = invgamma.mean(alpha_n, scale=beta_n)
+        self.private_mu_means = means.copy()
+        mu = np.random.normal(loc=m_n, scale=np.sqrt(sigma2 / kappa_n))
+
+        masked_indices = np.where(available_teammates == 1)[0]
+        max_index = masked_indices[np.argmax(mu[available_teammates == 1])]
+
+        return max_index
+
+    def update(self, arms_pulled, advantage):
+        self.ns *= self.gamma
+        self.r *= self.gamma
+        self.r_squared *= self.gamma
+        self.arm_avails *= self.gamma
+
+        self.arm_avails = 0.99 * self.arm_avails + 0.01 * self.last_available_teammates
+        self.arm_avails = np.maximum(self.arm_avails, self.min_arm_prob)
+
+        self.ns += arms_pulled / self.arm_avails
+        self.r += advantage * arms_pulled / self.arm_avails
+        self.r_squared += arms_pulled * advantage**2 / self.arm_avails
+
+        self.ns = np.maximum(self.ns, 1.0)
+
+    def dist_mode(self, prior=None):
+        print(f"means: {self.private_mu_means}, vars: {self.private_std_mean}")
+        return self.private_mu_means
+
+    def __str__(self):
+        st = ""
+        st += f"means: {self.private_mu_means}, vars: {self.private_std_mean}"
+        st += f"rs: {self.r}\n"
+        st += f"rsquared: {self.r_squared}\n"
+        st += f"ns: {self.ns}\n"
+        st += "hyper params:\n"
+        st += f"alpha0: {self.alpha0}, beta0: {self.beta0}, kappa0: {self.kappa0}, m0: {self.m0}"
+        return st
 
 
 # # Example usage
@@ -511,7 +621,7 @@ class MATCH:
         n_explore=5,
     ):
         if stype == "Thompson":
-            self.listener = Thompson_Gaussian_Sleepy(
+            self.listener = Thompson_Gaussian_Sleepy2(
                 n_agents=n_agents,
                 gamma=gamma,
                 lambda_=lambda_,
@@ -961,11 +1071,463 @@ def test_match(n_agents, n_steps, n_trials, adv, verbose=False, skillvec=np.ones
         plt.show()
 
 
+def e_v(policies, rewards):
+    action_spaces = [len(p) for p in policies]
+    ev = 0.0
+    for joint_action in np.ndindex(*action_spaces):
+        prob = 1.0
+        for agent, action in enumerate(joint_action):
+            prob *= policies[agent][action]
+        ev += prob * rewards[joint_action]
+    return ev
+
+
+def match_bos(
+    n_agents=2,
+    n_steps=50,
+    n_trials=50,
+    verbose=False,
+    rewards=np.array([[1.5, 0], [0, 1]]),
+    policies=np.array([[1.0, 0.0], [0.0, 1.0]]),
+    stride=2,
+    step_explore=10,
+):
+    if verbose:
+        print(f"Agents following policies {policies} \nfor rewards: {rewards}")
+        print(
+            f"Show expected values: {e_v([policies[0]]*n_agents,rewards)}, {e_v([policies[1]]*n_agents,rewards)}"
+        )
+    V = []
+    for a in range(n_agents):
+        V.append(e_v([policies[a]] * n_agents, rewards))
+    perf = np.zeros(shape=(n_steps, n_trials))
+    listenermus = np.zeros(shape=(n_steps, n_agents, n_agents))
+    speakermus = np.zeros(shape=(n_steps, n_agents, n_agents))
+    action_dist = np.zeros(shape=(n_steps, n_agents * n_agents))
+    for trial in range(n_trials):
+        if trial % 10 == 0:
+            print(f"trial: {trial} / n_trials")
+        matches = [
+            MATCH(
+                n_agents,
+                i,
+                single=False,
+                lambda_=0.98,
+                gamma=0.98,
+                speaker_decay=0.99,
+                n_explore=step_explore,
+            )
+            for i in range(n_agents)
+        ]
+        for i in range(n_steps):
+            targets = np.zeros((n_agents, n_agents), dtype=np.int64)
+            speaker_adv = np.zeros((n_agents, n_agents))
+            for a in range(n_agents):
+                mtc = matches[a]
+                mtc: MATCH
+                targets[a] = mtc.choose_target(
+                    prior=None, available_teammates=np.ones(n_agents)
+                )
+            if verbose:
+                print(f"targets: \n{targets}")
+            actions = np.zeros(n_agents, dtype=np.int64)
+            told_to = np.zeros((n_agents, n_agents), dtype=np.int64)
+            leaders = np.zeros(n_agents)
+            for ai in range(n_agents):
+                for aj in range(n_agents):
+                    told_to[ai, aj] = np.argmax(
+                        np.random.multinomial(1, pvals=policies[ai])
+                    )
+            if verbose:
+                print(f"told_to: {told_to}")
+            for a in range(n_agents):
+                mtc = matches[a]
+                mtc: MATCH
+                options = targets[:, a].flatten().copy()
+                chosen_action, leader = mtc.policy_with_oracle(
+                    commanded_by=options,
+                    prior=np.zeros(n_agents),
+                    told_to=told_to[:, a],
+                )
+                if verbose:
+                    print(
+                        f"agent: {a}, chosing from: {options}, leader: {leader} with action {chosen_action} from policy {policies[leader]}"
+                    )
+                # TODO update all speakers for which the action matches
+                actions[a] = chosen_action
+                leaders[a] = leader
+                # if we listened, then that commander gets a bonus
+                speaker_adv[leader, a] = 1 if a != leader else 0
+
+            r = rewards.copy()
+            for ac in actions:
+                r = r[ac]
+            perf[i, trial] = r  # rewards[actions[0], actions[1]]
+
+            if n_agents == 2:
+                action_dist[i, actions[0] + 2 * actions[1]] += 1
+            if verbose:
+                print(
+                    f"Chosen actions: {actions}, rewards: {rewards[actions[0],actions[1]]}"
+                )
+
+            if verbose:
+                print(f"speaker_adv: \n{speaker_adv}")
+            augmented_targets = np.copy(targets)
+            for ag in range(n_agents):
+                augmented_targets[ag, ag] = 1
+            for speaker in range(n_agents):
+                mtc = matches[speaker]
+                mtc: MATCH
+                matches[speaker].update_speaker(
+                    adv=speaker_adv[speaker],
+                    n_options=augmented_targets.sum(axis=0).flatten() - 1,
+                )
+                if verbose:
+                    print(
+                        f"updateing speaker: {speaker} with adv: {speaker_adv[speaker]} and targets: {matches[speaker].targets} with n_options {augmented_targets.sum(axis=0).flatten()}"
+                    )
+            for listener in range(n_agents):
+                mtc = matches[listener]
+                mtc: MATCH
+                l = mtc.selected
+
+                # ad = np.random.normal(loc=adv[listener, l], scale=0.5)
+                ad = r - V[listener]
+                if verbose:
+                    print(
+                        f" listener: {listener} followed leader: {l} from {mtc.leaders} and got adv {ad}: r{r} - V{V[listener]}"
+                    )
+                matches[listener].update_listener(adv=ad)
+
+            for ag in range(n_agents):
+                listenermus[i, ag] += matches[ag].listener.mu.copy()
+                speakermus[i, ag] += matches[ag].speaker.dist_mode()
+                # print(matches[ag].listener.mu.copy())
+                # print(mus[i])
+            if verbose:
+                print("matches: ")
+                for m in matches:
+                    print(m)
+                input()
+        # print(matches[0].listener)
+        # print(matches[1].listener)
+        # print(matches[2].listener)
+    action_dist = action_dist / n_trials
+    mus = listenermus / n_trials
+    speakermus = speakermus / n_trials
+    avg_perf = perf.mean(axis=-1)
+    std = np.std(perf, axis=-1) / np.sqrt(n_trials)
+
+    return (
+        mean_pool_stride(action_dist, stride),
+        mean_pool_stride(mus, stride),
+        mean_pool_stride(speakermus, stride),
+        mean_pool_stride(avg_perf, stride),
+        mean_pool_stride(std, stride),
+    )
+
+
+def mean_pool_stride(arr, stride):
+    new_len = arr.shape[0] // stride
+    pooled = (
+        arr[: new_len * stride].reshape(new_len, stride, *arr.shape[1:]).mean(axis=1)
+    )
+    return pooled
+
+
+def plot_bos(trials, stride=2):
+    n_agents = 2
+    fig, axes = plt.subplots(2, 3, figsize=(12, 6))
+    print(trials["Performance"][0])
+    print(trials["STDV"][0])
+    colors = ["red", "green", "blue"]
+    rgb = [[0.9, 0.2, 0.2], [0.2, 0.9, 0.2], [0.2, 0.2, 0.9]]
+    x = np.arange(len(trials["Performance"][0])) * stride
+    lstyles = ["dashed", "solid", "dotted", "-."]
+    markers = ["*", "P"]
+    agent_markers = ["o", "^"]
+
+    for exp in range(3):
+        axes[0, 0].plot(
+            x,
+            trials["Performance"][exp],
+            label=trials["Titles"][exp],
+            color=[0.0, 0.0, 0.0],
+            linestyle=lstyles[exp],
+        )
+    axes[0, 0].legend(trials["Titles"])
+    for exp in range(3):
+        axes[0, 0].fill_between(
+            x,
+            trials["Performance"][exp] - trials["STDV"][exp],
+            trials["Performance"][exp] + trials["STDV"][exp],
+            color=[0.0, 0.0, 0.0],
+            alpha=0.3,
+        )
+    axes[0, 0].grid()
+    axes[0, 0].set_title("Performance")
+    axes[0, 1].set_title("Speaker Means")
+    experiment_handles = [
+        Line2D([0], [0], color="black", linestyle=lstyles[0], lw=2, label="Basic"),
+        Line2D([0], [0], color="black", linestyle=lstyles[1], lw=2, label="Variance"),
+        Line2D([0], [0], color="black", linestyle=lstyles[2], lw=2, label="Uneven"),
+    ]
+    agent_handles = [
+        Line2D(
+            [0],
+            [0],
+            color="black",
+            marker=agent_markers[0],
+            linestyle="None",
+            markersize=8,
+            label="Agent 1",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color="black",
+            marker=agent_markers[1],
+            linestyle="None",
+            markersize=8,
+            label="Agent 2",
+        ),
+        # Line2D(
+        #     [0],
+        #     [0],
+        #     color="black",
+        #     marker="^",
+        #     linestyle="None",
+        #     markersize=8,
+        #     label="Agent C",
+        # ),
+    ]
+    arm_handles = [
+        Line2D(
+            [0],
+            [0],
+            color="black",
+            marker=markers[0],
+            linestyle="None",
+            markersize=8,
+            label="Other 1",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color="black",
+            marker=markers[1],
+            linestyle="None",
+            markersize=8,
+            label="Other 2",
+        ),
+        # Line2D(
+        #     [0],
+        #     [0],
+        #     color="black",
+        #     marker="D",
+        #     linestyle="None",
+        #     markersize=8,
+        #     label="Arm 3",
+        # ),
+    ]
+    for exp in range(3):
+        for agent in range(n_agents):
+            for arm in range(n_agents):
+
+                y = trials["Speaker Mean"][exp][:, agent, arm]
+                axes[0, 1].plot(
+                    x,
+                    y,
+                    # label=f"Exp {exp}, Agent {agent}, Action {arm}",
+                    color=[0.0, 0.0, 0.0],
+                    linestyle=lstyles[exp],
+                )
+                axes[0, 1].plot(
+                    x[::10],
+                    y[::10],
+                    marker=markers[arm],
+                    linestyle="None",
+                    color=[0.0, 0.0, 0.0],
+                    markersize=6,
+                )
+                axes[0, 1].plot(
+                    x[5::10],
+                    y[5::10],
+                    marker=agent_markers[agent],
+                    linestyle="None",
+                    color=[0.0, 0.0, 0.0],
+                    markersize=6,
+                )
+    axes[0, 1].legend(
+        handles=experiment_handles + agent_handles + arm_handles,
+        loc="lower right",
+    )
+
+    for exp in range(3):
+        for agent in range(n_agents):
+            for arm in range(n_agents):
+                y = trials["Listener Mean"][exp][:, agent, arm]
+                axes[0, 2].plot(
+                    x,
+                    y,
+                    # label=f"Exp {exp}, Agent {agent}, Action {arm}",
+                    color=[0.0, 0.0, 0.0],
+                    linestyle=lstyles[exp],
+                )
+                axes[0, 2].plot(
+                    x[::10],
+                    y[::10],
+                    marker=markers[arm],
+                    linestyle="None",
+                    color=[0.0, 0.0, 0.0],
+                    markersize=6,
+                )
+                axes[0, 2].plot(
+                    x[5::10],
+                    y[5::10],
+                    marker=agent_markers[agent],
+                    linestyle="None",
+                    color=[0.0, 0.0, 0.0],
+                    markersize=6,
+                )
+    axes[0, 2].legend(
+        handles=experiment_handles + agent_handles + arm_handles,
+        loc="lower right",
+    )
+    axes[0, 2].set_title("Listener Means")
+
+    for exp in range(3):
+        for a in range(4):
+            axes[1, exp].plot(
+                x,
+                trials["Action Dist"][exp][:, a],
+                linestyle=lstyles[a],
+                color=[0.0, 0.0, 0.0],
+            )
+        axes[1, exp].set_title(f"Action distribution Exp {exp}")
+        axes[1, exp].legend(["0,0", "1,0", "0,1", "1,1"])
+
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+    exit()
+
+
+def bos_experiments(ntrials=100, nsteps=100, stride=5):
+    trials = {
+        "Action Dist": [],
+        "Listener Mean": [],
+        "Speaker Mean": [],
+        "Performance": [],
+        "STDV": [],
+        "Q75": [],
+        "Titles": [],
+    }
+
+    a, lis, s, p, stdv = match_bos(
+        n_agents=2,
+        n_steps=nsteps,
+        n_trials=ntrials,
+        verbose=False,
+        rewards=np.array([[1.0, 0.0], [0.0, 1.0]]),
+        policies=np.array([[1.0, 0.0], [0.0, 1.0]]),
+        stride=stride,
+    )
+    trials["Titles"].append("Basic [1,1], pi_1: 1.0, pi_2: 0.0")
+    trials["Action Dist"].append(a)
+    trials["Listener Mean"].append(lis)
+    trials["Speaker Mean"].append(s)
+    trials["Performance"].append(p)
+    trials["STDV"].append(stdv)
+
+    a, lis, s, p, stdv = match_bos(
+        n_agents=2,
+        n_steps=nsteps,
+        n_trials=ntrials,
+        verbose=False,
+        rewards=np.array([[3.0, 0.0], [0.0, 1.0]]),
+        policies=np.array([[0.5, 0.5], [0.0, 1.0]]),
+        stride=stride,
+    )
+    trials["Titles"].append("Variance [3,1], pi_1: 0.5, pi_2: 0.0")
+    trials["Action Dist"].append(a)
+    trials["Listener Mean"].append(lis)
+    trials["Speaker Mean"].append(s)
+    trials["Performance"].append(p)
+    trials["STDV"].append(stdv)
+
+    a, lis, s, p, stdv = match_bos(
+        n_agents=2,
+        n_steps=nsteps,
+        n_trials=ntrials,
+        verbose=False,
+        rewards=np.array([[1.0, 0.0], [0.0, 0.5]]),
+        policies=np.array([[1.0, 0.0], [0.0, 1.0]]),
+        stride=stride,
+    )
+    trials["Titles"].append("Uneven [1,0.5], pi_1: 1.0, pi_2: 0.0")
+    trials["Action Dist"].append(a)
+    trials["Listener Mean"].append(lis)
+    trials["Speaker Mean"].append(s)
+    trials["Performance"].append(p)
+    trials["STDV"].append(stdv)
+
+    plot_bos(trials, stride=stride)
+
+
+# WARNING: The script isympy.exe is installed in 'C:\Users\tcfla\AppData\Roaming\Python\Python312\Scripts' which is not on PATH.
+# Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
 if __name__ == "__main__":
+
+    s = Thompson_Gaussian_Sleepy2(
+        n_agents=3,
+        prior_strength=1,
+        experience_strength=1,
+        id=0,
+        mu_0=0,
+        n_0=1,
+    )
+
     # check_baseline(5)
     n_agents = 5
     n_steps = 500
     n_trials = 100
+
+    performances = []
+    for na in range(2, 5):
+        policies = []
+        for p in range(na):
+            policies.append(np.zeros(na))
+            policies[-1][p] = 1.0
+        rewards = np.zeros(shape=[na] * na)
+        idx = np.arange(na)
+        rewards[tuple([idx] * na)] = 1.0
+        # print("Expected Value Uniform")
+        # print(e_v([np.ones(na) / na] * na, rewards))
+        # input("?")
+
+        a, lis, s, p, stdv = match_bos(
+            n_agents=na,
+            n_steps=200,
+            n_trials=50,
+            policies=np.array(policies),
+            rewards=rewards,
+            stride=2,
+            step_explore=(na**2) * 2,
+            verbose=False,
+        )
+        print(s.shape)
+        for i in range(na):
+            plt.plot(s.mean(1)[:, i])
+        plt.show()
+        for i in range(na):
+            plt.plot(lis.mean(1)[:, i])
+        plt.show()
+        # performances.append(p)
+        plt.plot(p)
+        plt.show()
+    bos_experiments(nsteps=600, ntrials=250, stride=10)
     # test_thompsons(n_agents, 500, 500)
     # exit()
 
